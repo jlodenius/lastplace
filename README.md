@@ -33,6 +33,40 @@ android-studio
 Open the project, let Gradle sync, then Run ▶ on your phone (with USB debugging on) or an
 emulator. Run the tests with `./gradlew test`.
 
+## Releasing an update
+
+Updates are delivered over the air via [Obtainium](https://github.com/ImranR98/Obtainium):
+push a version tag and GitHub Actions builds, signs, and publishes a new APK.
+
+After making your changes:
+
+```bash
+git add -A
+git commit -m "describe your changes"
+git push
+
+# tag the new version (bump the number each time) and push the tag
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+Pushing the tag triggers the release workflow. Watch it finish with:
+
+```bash
+gh run watch
+```
+
+Once it's green, open Obtainium on your phone (pull down to refresh) — it shows
+**Update available** for LastPlace; one tap installs it.
+
+Notes:
+- **Always bump the tag** (`v0.1.2` → `v0.1.3` → …). The version number must increase or
+  Android won't install the update over the existing app. The internal version code is
+  set automatically from the CI run number.
+- Signing is handled in CI using the release keystore stored in the repo's GitHub
+  Secrets — every release is signed with the same key, which is what lets updates install
+  cleanly. Keep that keystore (and its passwords) backed up.
+
 ## Built with
 
 Kotlin · Jetpack Compose · Room · OpenStreetMap (Photon search, Overpass geometry,
