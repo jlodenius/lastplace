@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android / IDE
+local.properties
+*.iml
+.idea/
+.kotlin/
+captures/
+.cxx/
+
+# Signing — never commit keystores or secrets
+*.jks
+*.keystore
+*.b64
+keystore.properties
+
+# Nix
+result
+result-*
+
+# Claude
+PLAN.md
