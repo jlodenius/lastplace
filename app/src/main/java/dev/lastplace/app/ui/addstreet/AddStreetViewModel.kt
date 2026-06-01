@@ -62,6 +62,11 @@ class AddStreetViewModel(
     private val _state = MutableStateFlow(AddStreetUiState(isEditing = streetId >= 0))
     val state: StateFlow<AddStreetUiState> = _state.asStateFlow()
 
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message
+
+    fun clearMessage() { _message.value = null }
+
     private var nearBias: LatLng? = null
     private val queryFlow = MutableStateFlow("")
 
@@ -101,7 +106,10 @@ class AddStreetViewModel(
         val lat = s.lat
         val lng = s.lng
         if (lat != null && lng != null && s.geometry.isEmpty() && s.name.isNotBlank()) {
-            loadGeometry(s.name, LatLng(lat, lng))
+            // Route through the nearest-street path so the name gets re-resolved from
+            // OSM (the stored name may not match an OSM way tag exactly) and so we keep
+            // the nearest segment as a fallback when the full fetch comes up empty.
+            onMapPointPicked(LatLng(lat, lng))
         }
     }
 
@@ -138,21 +146,38 @@ class AddStreetViewModel(
     }
 
     /**
-     * A point chosen on the map (or current location). Identifies the street via OSM (not the
-     * device geocoder, which mis-names), then loads the whole street's geometry.
+     * A point chosen on the map (or current location). Identifies the street via OSM
+     * (not the device geocoder, which mis-names), then loads the whole street's
+     * geometry. If the wide name-based fetch finds nothing, we keep the nearest segment
+     * we already have in hand rather than throwing it away.
      */
     fun onMapPointPicked(point: LatLng) {
         queryFlow.value = ""
         _state.update { it.copy(lat = point.lat, lng = point.lng, geometryLoading = true) }
         viewModelScope.launch {
-            val name = osmService.nearestStreetName(point)
+            val nearest = osmService.nearestStreet(point)
+            val resolvedName = nearest?.name
                 ?: locationProvider.reverseStreetName(point)
-            if (name.isNullOrBlank()) {
+            if (resolvedName.isNullOrBlank()) {
                 _state.update { it.copy(geometryLoading = false) }
+                _message.value = "Couldn't identify a street at this point — try Pick on map closer to the road"
                 return@launch
             }
-            val ways = osmService.fetchGeometry(name, point)
-            _state.update { it.copy(name = name, geometry = ways, geometryLoading = false) }
+            val full = osmService.fetchGeometry(resolvedName, point)
+            val ways = when {
+                full.isNotEmpty() -> full
+                nearest != null -> listOf(nearest.geometry) // salvage at least the nearest segment
+                else -> emptyList()
+            }
+            val totalPoints = ways.sumOf { it.size }
+            _state.update {
+                it.copy(name = resolvedName, geometry = ways, geometryLoading = false)
+            }
+            _message.value = when {
+                ways.isEmpty() -> "Couldn't fetch any street shape here — try Pick on map closer"
+                full.isEmpty() -> "Captured one segment only ($totalPoints points) — try again or Pick on map closer for the full street"
+                else -> "Captured $totalPoints points across ${ways.size} segments"
+            }
         }
     }
 

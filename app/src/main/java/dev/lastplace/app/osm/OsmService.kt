@@ -18,6 +18,12 @@ data class StreetSuggestion(
     val point: LatLng,
 )
 
+/** The OSM road nearest a query point, with the geometry of that single way segment. */
+data class NearestStreet(
+    val name: String,
+    val geometry: List<LatLng>,
+)
+
 /**
  * Talks to public OpenStreetMap services:
  *  - Photon (photon.komoot.io) for street autocomplete,
@@ -46,13 +52,16 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
         }
 
     /**
-     * The name of the named road nearest to [point] (per OSM). Used after a map tap so we
-     * match OSM's own naming exactly, instead of guessing via reverse geocoding.
+     * The OSM named road nearest to [point], together with the geometry of that single
+     * way segment. Used after a map tap so we match OSM's own naming exactly, and so we
+     * always have at least one segment of real street geometry to fall back to even if
+     * a wider name-based fetch later turns up empty. Radius 150 m is forgiving of saved
+     * points that are slightly off the road itself.
      */
-    suspend fun nearestStreetName(point: LatLng): String? = withContext(Dispatchers.IO) {
+    suspend fun nearestStreet(point: LatLng): NearestStreet? = withContext(Dispatchers.IO) {
         val query = """
             [out:json][timeout:25];
-            way(around:50,${point.lat},${point.lng})["highway"]["name"];
+            way(around:150,${point.lat},${point.lng})["highway"]["name"];
             out geometry;
         """.trimIndent()
         val request = Request.Builder()
@@ -63,7 +72,7 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
         runCatching {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@use null
-                parseNearestName(response.body?.string().orEmpty(), point)
+                parseNearestStreet(response.body?.string().orEmpty(), point)
             }
         }.getOrNull()
     }
@@ -117,9 +126,9 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
     }
 
     /** Among the named ways returned, picks the one whose line is closest to [point]. */
-    private fun parseNearestName(body: String, point: LatLng): String? {
+    private fun parseNearestStreet(body: String, point: LatLng): NearestStreet? {
         val elements = JSONObject(body).optJSONArray("elements") ?: return null
-        var bestName: String? = null
+        var best: NearestStreet? = null
         var bestDistance = Double.MAX_VALUE
         for (i in 0 until elements.length()) {
             val element = elements.optJSONObject(i) ?: continue
@@ -135,10 +144,10 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
             val distance = StreetMatcher.distanceToPolylineMeters(point, points)
             if (distance < bestDistance) {
                 bestDistance = distance
-                bestName = name
+                best = NearestStreet(name, points)
             }
         }
-        return bestName
+        return best
     }
 
     private fun parseOverpass(body: String): List<List<LatLng>> {

@@ -2,6 +2,7 @@ package dev.lastplace.app.ui.addstreet
 
 import android.Manifest
 import android.app.TimePickerDialog
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -64,8 +67,17 @@ fun AddStreetScreen(
         viewModel(factory = AddStreetViewModel.factory(container, streetId))
     val state by viewModel.state.collectAsState()
     val suggestions by viewModel.suggestions.collectAsState()
+    val message by viewModel.message.collectAsState()
 
     LaunchedEffect(state.saved) { if (state.saved) onBack() }
+
+    LaunchedEffect(message) {
+        val msg = message
+        if (msg != null) {
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearMessage()
+        }
+    }
 
     // Receive the point chosen on the map picker (passed back via the nav back stack).
     val savedStateHandle = navController.currentBackStackEntry?.savedStateHandle
@@ -169,14 +181,26 @@ fun AddStreetScreen(
             }
 
             // Force a fresh OSM lookup at the saved point — re-resolves the name and
-            // pulls the full street geometry. Visible whenever there's a location to
-            // refresh from, so it's available even for already-mapped streets.
-            if (state.hasLocation && !state.geometryLoading) {
+            // pulls the full street geometry. Stays visible while loading (with a
+            // spinner) so taps don't feel ignored.
+            if (state.hasLocation) {
                 OutlinedButton(
-                    onClick = { viewModel.refreshStreetGeometry() },
+                    onClick = {
+                        if (!state.geometryLoading) viewModel.refreshStreetGeometry()
+                    },
+                    enabled = !state.geometryLoading,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (state.isMapped) "Refresh street shape" else "Capture full street shape")
+                    if (state.geometryLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Looking up OSM…")
+                    } else {
+                        Text(if (state.isMapped) "Refresh street shape" else "Capture full street shape")
+                    }
                 }
             }
 
