@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
@@ -61,6 +63,7 @@ fun StreetListScreen(
     val viewModel: StreetListViewModel = viewModel(factory = StreetListViewModel.factory(container))
     val state by viewModel.uiState.collectAsState()
     val message by viewModel.message.collectAsState()
+    val parkLoading by viewModel.parkLoading.collectAsState()
 
     LaunchedEffectMessage(message) {
         Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
@@ -98,11 +101,22 @@ fun StreetListScreen(
 
             if (state.active == null) {
                 ExtendedFloatingActionButton(
-                    text = { Text("Park where I am") },
-                    icon = { Icon(Icons.Filled.LocationOn, contentDescription = null) },
+                    text = { Text(if (parkLoading) "Detecting…" else "Park where I am") },
+                    icon = {
+                        if (parkLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Filled.LocationOn, contentDescription = null)
+                        }
+                    },
                     onClick = {
-                        if (container.locationProvider.hasPermission()) viewModel.parkWhereIAm()
-                        else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        if (!parkLoading) {
+                            if (container.locationProvider.hasPermission()) viewModel.parkWhereIAm()
+                            else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
                     },
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                 )

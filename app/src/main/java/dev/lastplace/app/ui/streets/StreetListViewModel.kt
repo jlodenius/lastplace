@@ -59,22 +59,21 @@ class StreetListViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
+    private val _parkLoading = MutableStateFlow(false)
+    val parkLoading: StateFlow<Boolean> = _parkLoading
+
     val uiState: StateFlow<HomeUiState> =
         combine(
             streetRepository.observeStreetsWithRules(),
             parkingRepository.observeActiveSession(),
         ) { streets, active ->
             val now = ZonedDateTime.now()
-            val withNext = streets.map { swr ->
-                swr to scheduleEngine.nextWindowStart(swr.rules.map { it.toWindow() }, now)
-            }
-            // When free to choose where to park, surface where you can stay longest first.
+            // Always rank by how much free time each street has — most useful when choosing
+            // where to park, and still informative when already parked (where to move to next).
             // Streets with no cleaning hours (park anytime) sort to the very top.
-            val ordered = if (active == null) {
-                withNext.sortedByDescending { it.second?.toInstant()?.toEpochMilli() ?: Long.MAX_VALUE }
-            } else {
-                withNext
-            }
+            val ordered = streets
+                .map { swr -> swr to scheduleEngine.nextWindowStart(swr.rules.map { it.toWindow() }, now) }
+                .sortedByDescending { it.second?.toInstant()?.toEpochMilli() ?: Long.MAX_VALUE }
             val rows = ordered.map { (swr, next) ->
                 StreetRow(
                     id = swr.street.id,
@@ -111,26 +110,32 @@ class StreetListViewModel(
             _message.value = "Location permission needed"
             return@launch
         }
-        val location = locationProvider.current()
-        if (location == null) {
-            _message.value = "Couldn't get your location — try again outdoors"
-            return@launch
-        }
-        val targets = streetRepository.observeStreetsWithRules().first().map { swr ->
-            StreetMatcher.Target(
-                id = swr.street.id,
-                name = swr.street.name,
-                point = LatLng(swr.street.lat, swr.street.lng),
-                matchRadiusMeters = swr.street.matchRadiusMeters,
-                geometry = GeometryCodec.decode(swr.street.geometry),
-            )
-        }
-        val match = streetMatcher.match(location, targets)
-        if (match != null) {
-            parkingService.park(match.target.id)
-            _message.value = "Parked on ${match.target.name}"
-        } else {
-            _message.value = "No saved street nearby — use \"Park here\" on the right one"
+        if (_parkLoading.value) return@launch // ignore re-taps while a fix is in flight
+        _parkLoading.value = true
+        try {
+            val location = locationProvider.current()
+            if (location == null) {
+                _message.value = "Couldn't get a GPS fix — try again with a clearer view of the sky"
+                return@launch
+            }
+            val targets = streetRepository.observeStreetsWithRules().first().map { swr ->
+                StreetMatcher.Target(
+                    id = swr.street.id,
+                    name = swr.street.name,
+                    point = LatLng(swr.street.lat, swr.street.lng),
+                    matchRadiusMeters = swr.street.matchRadiusMeters,
+                    geometry = GeometryCodec.decode(swr.street.geometry),
+                )
+            }
+            val match = streetMatcher.match(location, targets)
+            if (match != null) {
+                parkingService.park(match.target.id)
+                _message.value = "Parked on ${match.target.name}"
+            } else {
+                _message.value = "No saved street nearby — use \"Park here\" on the right one"
+            }
+        } finally {
+            _parkLoading.value = false
         }
     }
 
