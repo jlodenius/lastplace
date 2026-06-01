@@ -126,6 +126,18 @@ class AddStreetViewModel(
     }
 
     /**
+     * Re-runs the OSM nearest-street lookup at the currently saved location. Refreshes
+     * the street name + geometry — useful when the saved name didn't match OSM's name
+     * (so the original geometry fetch came up empty), or when an older street was saved
+     * with just a point.
+     */
+    fun refreshStreetGeometry() {
+        val lat = _state.value.lat ?: return
+        val lng = _state.value.lng ?: return
+        onMapPointPicked(LatLng(lat, lng))
+    }
+
+    /**
      * A point chosen on the map (or current location). Identifies the street via OSM (not the
      * device geocoder, which mis-names), then loads the whole street's geometry.
      */

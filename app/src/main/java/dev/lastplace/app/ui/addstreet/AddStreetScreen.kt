@@ -168,6 +168,18 @@ fun AddStreetScreen(
                 ) { Text("Use current location") }
             }
 
+            // Force a fresh OSM lookup at the saved point — re-resolves the name and
+            // pulls the full street geometry. Visible whenever there's a location to
+            // refresh from, so it's available even for already-mapped streets.
+            if (state.hasLocation && !state.geometryLoading) {
+                OutlinedButton(
+                    onClick = { viewModel.refreshStreetGeometry() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (state.isMapped) "Refresh street shape" else "Capture full street shape")
+                }
+            }
+
             Text("Cleaning hours", fontWeight = FontWeight.Bold)
             val canRemoveRule = state.rules.size > 1
             state.rules.forEachIndexed { index, rule ->
