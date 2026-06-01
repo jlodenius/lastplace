@@ -28,6 +28,9 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+/** Lower bound for the per-street match radius; absorbs GPS noise + street width. */
+private const val MIN_MATCH_RADIUS_METERS = 60
+
 data class StreetRow(
     val id: Long,
     val name: String,
@@ -123,7 +126,7 @@ class StreetListViewModel(
                     id = swr.street.id,
                     name = swr.street.name,
                     point = LatLng(swr.street.lat, swr.street.lng),
-                    matchRadiusMeters = swr.street.matchRadiusMeters,
+                    matchRadiusMeters = maxOf(swr.street.matchRadiusMeters, MIN_MATCH_RADIUS_METERS),
                     geometry = GeometryCodec.decode(swr.street.geometry),
                 )
             }

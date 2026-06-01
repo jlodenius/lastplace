@@ -73,7 +73,7 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
      * i.e. the whole street, so parking anywhere along it matches. The wide radius covers most
      * city streets in full; same-named roads elsewhere are excluded by being local.
      */
-    suspend fun fetchGeometry(name: String, near: LatLng, radiusMeters: Int = 3000): List<List<LatLng>> =
+    suspend fun fetchGeometry(name: String, near: LatLng, radiusMeters: Int = 5000): List<List<LatLng>> =
         withContext(Dispatchers.IO) {
             val safeName = name.replace("\"", "")
             val query = """

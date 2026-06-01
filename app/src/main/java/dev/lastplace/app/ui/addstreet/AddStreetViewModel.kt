@@ -38,7 +38,7 @@ data class AddStreetUiState(
     val name: String = "",
     val lat: Double? = null,
     val lng: Double? = null,
-    val matchRadiusMeters: Int = 40,
+    val matchRadiusMeters: Int = 60,
     val geometry: List<List<LatLng>> = emptyList(),
     val geometryLoading: Boolean = false,
     val rules: List<RuleInput> = listOf(RuleInput()),
@@ -46,7 +46,9 @@ data class AddStreetUiState(
 ) {
     val hasLocation: Boolean get() = lat != null && lng != null
     val isMapped: Boolean get() = geometry.isNotEmpty()
-    val canSave: Boolean get() = name.isNotBlank() && rules.isNotEmpty()
+    // Prevent saving while the street's shape is still loading — otherwise the user
+    // can race the fetch and end up with a point-only street that barely matches.
+    val canSave: Boolean get() = name.isNotBlank() && rules.isNotEmpty() && !geometryLoading
 }
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
@@ -91,6 +93,15 @@ class AddStreetViewModel(
                     .map { r -> RuleInput(r.dayOfWeek, r.startMinuteOfDay, r.endMinuteOfDay) }
                     .ifEmpty { listOf(RuleInput()) },
             )
+        }
+        // Streets saved before full-street capture worked have no geometry. If this one
+        // has a location and a name but no geometry, fetch the whole street now so the
+        // user only has to open + save it to upgrade it.
+        val s = _state.value
+        val lat = s.lat
+        val lng = s.lng
+        if (lat != null && lng != null && s.geometry.isEmpty() && s.name.isNotBlank()) {
+            loadGeometry(s.name, LatLng(lat, lng))
         }
     }
 

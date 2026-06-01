@@ -137,11 +137,16 @@ fun AddStreetScreen(
                 }
             }
 
-            // Location + geometry status.
+            // Location + geometry status — explicit so it's obvious whether the *whole
+            // street* was captured or just a point (which would barely match when parked).
             val statusText = when {
-                state.geometryLoading -> "Loading street shape…"
-                state.isMapped -> "Mapped ✓ — will detect when you're on this street"
-                state.hasLocation -> "Location set (point only)"
+                state.geometryLoading -> "Loading street shape… (wait before saving)"
+                state.isMapped -> {
+                    val points = state.geometry.sumOf { it.size }
+                    val segments = state.geometry.size
+                    "Mapped ✓ — full street captured ($points points across $segments segments)"
+                }
+                state.hasLocation -> "Location set (point only) — won't reliably match when parked"
                 else -> "No location yet (search, pick on map, or use current location)"
             }
             Text(statusText, style = MaterialTheme.typography.bodySmall)
