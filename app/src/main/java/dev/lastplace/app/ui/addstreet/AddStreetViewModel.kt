@@ -11,6 +11,7 @@ import dev.lastplace.app.data.db.GeometryCodec
 import dev.lastplace.app.data.db.Street
 import dev.lastplace.app.domain.model.LatLng
 import dev.lastplace.app.location.LocationProvider
+import dev.lastplace.app.osm.OsmRequestException
 import dev.lastplace.app.osm.OsmService
 import dev.lastplace.app.osm.StreetSuggestion
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -155,7 +156,13 @@ class AddStreetViewModel(
         queryFlow.value = ""
         _state.update { it.copy(lat = point.lat, lng = point.lng, geometryLoading = true) }
         viewModelScope.launch {
-            val nearest = osmService.nearestStreet(point)
+            val nearest = try {
+                osmService.nearestStreet(point)
+            } catch (e: OsmRequestException) {
+                _state.update { it.copy(geometryLoading = false) }
+                _message.value = "Map service error: ${e.message}"
+                return@launch
+            }
             val resolvedName = nearest?.name
                 ?: locationProvider.reverseStreetName(point)
             if (resolvedName.isNullOrBlank()) {
@@ -163,7 +170,18 @@ class AddStreetViewModel(
                 _message.value = "Couldn't identify a street at this point — try Pick on map closer to the road"
                 return@launch
             }
-            val full = osmService.fetchGeometry(resolvedName, point)
+            // A hard failure on the wider fetch isn't fatal — fall back to the nearest
+            // segment below — but record it so the message can explain a partial result.
+            val full = try {
+                osmService.fetchGeometry(resolvedName, point)
+            } catch (e: OsmRequestException) {
+                if (nearest == null) {
+                    _state.update { it.copy(geometryLoading = false) }
+                    _message.value = "Map service error: ${e.message}"
+                    return@launch
+                }
+                emptyList()
+            }
             val ways = when {
                 full.isNotEmpty() -> full
                 nearest != null -> listOf(nearest.geometry) // salvage at least the nearest segment
@@ -184,7 +202,13 @@ class AddStreetViewModel(
     private fun loadGeometry(name: String, point: LatLng) {
         viewModelScope.launch {
             _state.update { it.copy(geometryLoading = true) }
-            val ways = osmService.fetchGeometry(name, point)
+            val ways = try {
+                osmService.fetchGeometry(name, point)
+            } catch (e: OsmRequestException) {
+                _state.update { it.copy(geometryLoading = false) }
+                _message.value = "Map service error: ${e.message}"
+                return@launch
+            }
             _state.update { it.copy(geometry = ways, geometryLoading = false) }
         }
     }

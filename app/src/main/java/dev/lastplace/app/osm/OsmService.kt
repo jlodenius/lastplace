@@ -1,5 +1,6 @@
 package dev.lastplace.app.osm
 
+import android.util.Log
 import dev.lastplace.app.domain.StreetMatcher
 import dev.lastplace.app.domain.model.LatLng
 import kotlinx.coroutines.Dispatchers
@@ -9,7 +10,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.IOException
 import java.net.URLEncoder
+
+/**
+ * A hard failure talking to an OSM service (non-2xx HTTP, network error, timeout) — as
+ * opposed to a successful-but-empty result. Carries a short, user-presentable [message]
+ * so the UI can say *why* a fetch failed instead of a generic "couldn't fetch".
+ */
+class OsmRequestException(message: String) : Exception(message)
 
 /** A street search result from Photon. */
 data class StreetSuggestion(
@@ -45,10 +54,14 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
             val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
             runCatching {
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use emptyList()
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "searchStreets: HTTP ${response.code}")
+                        return@use emptyList()
+                    }
                     parsePhoton(response.body?.string().orEmpty())
                 }
-            }.getOrDefault(emptyList())
+            }.onFailure { Log.w(TAG, "searchStreets: request failed", it) }
+                .getOrDefault(emptyList())
         }
 
     /**
@@ -62,19 +75,9 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
         val query = """
             [out:json][timeout:25];
             way(around:150,${point.lat},${point.lng})["highway"]["name"];
-            out geometry;
+            out geom;
         """.trimIndent()
-        val request = Request.Builder()
-            .url("https://overpass-api.de/api/interpreter")
-            .post(query.toRequestBody("text/plain".toMediaType()))
-            .header("User-Agent", USER_AGENT)
-            .build()
-        runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                parseNearestStreet(response.body?.string().orEmpty(), point)
-            }
-        }.getOrNull()
+        parseNearestStreet(overpass(query, "nearestStreet"), point)
     }
 
     /**
@@ -88,20 +91,42 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
             val query = """
                 [out:json][timeout:25];
                 way["highway"]["name"="$safeName"](around:$radiusMeters,${near.lat},${near.lng});
-                out geometry;
+                out geom;
             """.trimIndent()
-            val request = Request.Builder()
-                .url("https://overpass-api.de/api/interpreter")
-                .post(query.toRequestBody("text/plain".toMediaType()))
-                .header("User-Agent", USER_AGENT)
-                .build()
-            runCatching {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use emptyList()
-                    parseOverpass(response.body?.string().orEmpty())
-                }
-            }.getOrDefault(emptyList())
+            parseOverpass(overpass(query, "fetchGeometry"))
         }
+
+    /**
+     * POSTs an Overpass QL [query] and returns the response body. Logs and throws
+     * [OsmRequestException] on any hard failure (non-2xx, network, timeout) so callers
+     * can surface a specific reason; a successful-but-empty result comes back as a body
+     * the parser turns into an empty list. [label] tags the log line for the call site.
+     */
+    private fun overpass(query: String, label: String): String {
+        val request = Request.Builder()
+            .url(OVERPASS_URL)
+            .post(query.toRequestBody("text/plain".toMediaType()))
+            .header("User-Agent", USER_AGENT)
+            .build()
+        try {
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    val reason = when (response.code) {
+                        429 -> "rate limited (429) — too many requests, wait a moment"
+                        in 500..599 -> "Overpass server error (${response.code})"
+                        else -> "Overpass rejected the request (${response.code})"
+                    }
+                    Log.w(TAG, "$label: HTTP ${response.code} — ${body.take(300)}")
+                    throw OsmRequestException(reason)
+                }
+                return body
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "$label: network failure", e)
+            throw OsmRequestException("network error (${e.message ?: e.javaClass.simpleName})")
+        }
+    }
 
     private fun parsePhoton(body: String): List<StreetSuggestion> {
         val features = JSONObject(body).optJSONArray("features") ?: return emptyList()
@@ -166,6 +191,8 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
     }
 
     companion object {
+        private const val TAG = "OsmService"
         private const val USER_AGENT = "ParkingAssistant/0.1 (personal use)"
+        private const val OVERPASS_URL = "https://overpass-api.de/api/interpreter"
     }
 }
