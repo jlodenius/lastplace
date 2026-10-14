@@ -11,7 +11,10 @@ data class CleaningWindow(
     val dayOfWeek: DayOfWeek,
     val start: LocalTime,
     val end: LocalTime,
-)
+) {
+    val isDaytime: Boolean
+        get() = start >= LocalTime.of(8, 0) && end <= LocalTime.of(18, 0) && end > start
+}
 
 /** A geographic point. */
 data class LatLng(val lat: Double, val lng: Double)

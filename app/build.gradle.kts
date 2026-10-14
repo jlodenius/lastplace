@@ -98,6 +98,7 @@ dependencies {
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(libs.mockito.core)
     testImplementation(libs.kotlinx.coroutines.test)
 
     androidTestImplementation(libs.androidx.junit)

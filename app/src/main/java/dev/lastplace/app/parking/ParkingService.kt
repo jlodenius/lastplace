@@ -25,19 +25,19 @@ class ParkingService(
     private val reminderScheduler: ReminderScheduler,
 ) {
 
-    /** Registers the car as parked on [streetId]. Returns the new session id, or -1 if the street is gone. */
+    /** Returns the new session id, or -1 if the street is missing or currently being cleaned. */
     suspend fun park(
         streetId: Long,
         source: ParkSource = ParkSource.MANUAL,
         parkedAt: Instant = Instant.now(),
     ): Long {
-        // Only one active session at a time.
-        parkingRepository.getActiveSession()?.let { endParking(it.id) }
-
         val streetWithRules = streetRepository.getStreetWithRules(streetId) ?: return -1L
         val zonedParkedAt = parkedAt.atZone(ZoneId.systemDefault())
         val windows = streetWithRules.rules.map { it.toWindow() }
         val deadline = deadlineCalculator.deadline(windows, zonedParkedAt)
+        if (deadline != null && !deadline.isAfter(zonedParkedAt)) return -1L
+
+        parkingRepository.getActiveSession()?.let { endParking(it.id) }
 
         val sessionId = parkingRepository.startSession(
             streetId = streetId,

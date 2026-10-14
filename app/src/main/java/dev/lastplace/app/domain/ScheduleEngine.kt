@@ -4,32 +4,40 @@ import dev.lastplace.app.domain.model.CleaningWindow
 import java.time.ZonedDateTime
 import java.time.temporal.TemporalAdjusters
 
-/**
- * Computes when a street is next off-limits for parking.
- *
- * Pure Kotlin, no Android dependencies — fully unit-testable on the JVM. This is
- * the logic a missed reminder (and therefore a fine) would come from, so it is the
- * most heavily tested class in the project.
- */
+data class ParkingAvailability(
+    val nextCleaningStart: ZonedDateTime?,
+    val availableAt: ZonedDateTime?,
+) {
+    val isAvailable: Boolean get() = availableAt == null
+}
+
 class ScheduleEngine {
 
-    /**
-     * The earliest cleaning-window START strictly after [from], across all [windows],
-     * or `null` if [windows] is empty.
-     */
+    /** Returns the current cleaning start if already off-limits, otherwise the next start. */
     fun nextWindowStart(windows: List<CleaningWindow>, from: ZonedDateTime): ZonedDateTime? =
-        windows.map { nextStartFor(it, from) }.minOrNull()
+        availability(windows, from).nextCleaningStart
 
-    private fun nextStartFor(window: CleaningWindow, from: ZonedDateTime): ZonedDateTime {
-        val thisWeekDate = from.toLocalDate().with(TemporalAdjusters.nextOrSame(window.dayOfWeek))
-        val candidate = ZonedDateTime.of(thisWeekDate, window.start, from.zone)
-        // If the matching day is today but the window's start time has already
-        // passed (or we're inside the window), the next occurrence is next week.
-        return if (candidate.isAfter(from)) {
-            candidate
-        } else {
-            val nextWeekDate = from.toLocalDate().with(TemporalAdjusters.next(window.dayOfWeek))
-            ZonedDateTime.of(nextWeekDate, window.start, from.zone)
+    fun availability(windows: List<CleaningWindow>, from: ZonedDateTime): ParkingAvailability {
+        val occurrences = windows.flatMap { window ->
+            val previousDate = from.toLocalDate().with(TemporalAdjusters.previousOrSame(window.dayOfWeek))
+            listOf(previousDate, previousDate.plusWeeks(1)).map { date ->
+                val endDate = if (window.end.isAfter(window.start)) date else date.plusDays(1)
+                Occurrence(
+                    start = ZonedDateTime.of(date, window.start, from.zone),
+                    end = ZonedDateTime.of(endDate, window.end, from.zone),
+                )
+            }
+        }.filter { it.end.isAfter(from) }.sortedBy { it.start }
+
+        var availableAt: ZonedDateTime? = null
+        for (occurrence in occurrences) {
+            if (occurrence.start.isAfter(availableAt ?: from)) break
+            if (availableAt == null || occurrence.end.isAfter(availableAt)) {
+                availableAt = occurrence.end
+            }
         }
+        return ParkingAvailability(occurrences.firstOrNull()?.start, availableAt)
     }
+
+    private data class Occurrence(val start: ZonedDateTime, val end: ZonedDateTime)
 }

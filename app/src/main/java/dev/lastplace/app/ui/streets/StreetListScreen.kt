@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,22 +18,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -122,9 +127,48 @@ fun StreetListScreen(
                 )
             }
 
+            if (state.hasSavedStreets) {
+                Row(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = !state.daytimeOnly,
+                        onClick = { viewModel.showDaytimeOnly(false) },
+                        label = { Text("All streets") },
+                    )
+                    FilterChip(
+                        selected = state.daytimeOnly,
+                        onClick = { viewModel.showDaytimeOnly(!state.daytimeOnly) },
+                        label = { Text("Daytime cleaning") },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.WbSunny,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
+                    )
+                }
+                Text(
+                    "Daytime cleaning: within 08:00–18:00",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             if (state.streets.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No streets yet. Tap + to add one.")
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (state.hasSavedStreets) "No streets with daytime cleaning."
+                        else "No streets yet. Tap + to add one.",
+                    )
                 }
             } else {
                 LazyColumn {
@@ -140,8 +184,15 @@ fun StreetListScreen(
                                 Text(row.name, style = MaterialTheme.typography.bodyLarge)
                                 Spacer(Modifier.height(2.dp))
                                 StreetSubtitle(row)
+                                row.daytimeCleaningText?.let { times ->
+                                    Spacer(Modifier.height(6.dp))
+                                    DaytimeCleaningBadge(times)
+                                }
                             }
-                            TextButton(onClick = { viewModel.park(row.id) }) { Text("Park here") }
+                            TextButton(
+                                onClick = { viewModel.park(row.id) },
+                                enabled = row.isAvailable,
+                            ) { Text("Park here") }
                         }
                         HorizontalDivider()
                     }
@@ -153,6 +204,13 @@ fun StreetListScreen(
 
 @Composable
 private fun StreetSubtitle(row: StreetRow) {
+    if (!row.isAvailable) {
+        Text(
+            "Cleaning now · Available ${row.unavailableUntilText}",
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
     val highlight = SpanStyle(
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary,
@@ -169,6 +227,24 @@ private fun StreetSubtitle(row: StreetRow) {
         }
     }
     Text(text)
+}
+
+@Composable
+private fun DaytimeCleaningBadge(times: String) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.WbSunny, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text("Daytime cleaning · $times", style = MaterialTheme.typography.labelSmall)
+        }
+    }
 }
 
 @Composable

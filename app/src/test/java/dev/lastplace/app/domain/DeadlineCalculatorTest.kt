@@ -1,8 +1,10 @@
 package dev.lastplace.app.domain
 
+import dev.lastplace.app.domain.model.CleaningWindow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -15,6 +17,18 @@ class DeadlineCalculatorTest {
 
     private fun at(y: Int, mo: Int, d: Int, h: Int, mi: Int) =
         ZonedDateTime.of(LocalDate.of(y, mo, d), LocalTime.of(h, mi), zone)
+
+    @Test
+    fun parkingDuringCleaningHasAnAlreadyDueDeadline() {
+        val window = CleaningWindow(DayOfWeek.TUESDAY, LocalTime.of(9, 0), LocalTime.of(14, 0))
+        assertEquals(at(2026, 5, 26, 9, 0), calc.deadline(listOf(window), at(2026, 5, 26, 10, 0)))
+    }
+
+    @Test
+    fun parkingAfterCleaningHasNextWeeksDeadline() {
+        val window = CleaningWindow(DayOfWeek.TUESDAY, LocalTime.of(9, 0), LocalTime.of(14, 0))
+        assertEquals(at(2026, 6, 2, 9, 0), calc.deadline(listOf(window), at(2026, 5, 26, 14, 0)))
+    }
 
     @Test
     fun keepsFutureOffsetsSortedAscending() {

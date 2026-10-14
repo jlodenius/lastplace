@@ -11,7 +11,7 @@ class DeadlineCalculator(
     private val engine: ScheduleEngine = ScheduleEngine(),
 ) {
 
-    /** The moment the car must be moved by: the next cleaning window after [parkedAt]. */
+    /** The move deadline, already due if [parkedAt] falls inside a cleaning window. */
     fun deadline(windows: List<CleaningWindow>, parkedAt: ZonedDateTime): ZonedDateTime? =
         engine.nextWindowStart(windows, parkedAt)
 

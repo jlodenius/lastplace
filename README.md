@@ -11,8 +11,14 @@ move your car before the next cleaning window.
   along it, not just one spot.
 - **Set cleaning hours** — for each street, add the weekdays and time windows when
   parking isn't allowed.
-- **See where you can park longest** — your streets are ranked by time until their next
-  cleaning, each showing how long it's free (e.g. **Free for 3d 5h**).
+- **See where you can park longest** — available streets are ranked by time until their next
+  cleaning, each showing how long it's free (e.g. **Free for 3d 5h**). Streets being cleaned
+  show when parking becomes available and cannot be selected until cleaning ends. The list
+  updates automatically as cleaning starts and ends, including overnight windows.
+- **Find daytime cleaning** — a positive sun badge highlights cleaning windows entirely
+  within **08:00–18:00** (such as 09:00–14:00), with their weekdays and hours. Tap
+  **Daytime cleaning** to show only streets with at least one such window. The badge describes
+  the schedule, not current parking availability; other cleaning windows still apply.
 - **Park in one tap** — "Park where I am" uses your location to detect which saved street
   you're on, or pick one manually.
 - **Get reminded in time** — a notification fires a configurable number of hours before

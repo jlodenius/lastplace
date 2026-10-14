@@ -8,35 +8,28 @@ import dev.lastplace.app.AppContainer
 import dev.lastplace.app.data.ParkingRepository
 import dev.lastplace.app.data.StreetRepository
 import dev.lastplace.app.data.db.GeometryCodec
-import dev.lastplace.app.data.db.toWindow
 import dev.lastplace.app.domain.ScheduleEngine
 import dev.lastplace.app.domain.StreetMatcher
 import dev.lastplace.app.domain.model.LatLng
 import dev.lastplace.app.location.LocationProvider
 import dev.lastplace.app.parking.ParkingService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /** Lower bound for the per-street match radius; absorbs GPS noise + street width. */
 private const val MIN_MATCH_RADIUS_METERS = 60
-
-data class StreetRow(
-    val id: Long,
-    val name: String,
-    val freeFor: String?,           // e.g. "3d 5h"; null when there are no cleaning hours
-    val nextCleaningText: String?,  // e.g. "cleaning Tue 8 Jun, 08:00"
-)
 
 data class ActiveParking(
     val sessionId: Long,
@@ -48,6 +41,8 @@ data class ActiveParking(
 data class HomeUiState(
     val streets: List<StreetRow> = emptyList(),
     val active: ActiveParking? = null,
+    val daytimeOnly: Boolean = false,
+    val hasSavedStreets: Boolean = false,
 )
 
 class StreetListViewModel(
@@ -57,6 +52,7 @@ class StreetListViewModel(
     private val scheduleEngine: ScheduleEngine,
     private val streetMatcher: StreetMatcher,
     private val locationProvider: LocationProvider,
+    private val clock: Clock = Clock.systemDefaultZone(),
 ) : ViewModel() {
 
     private val _message = MutableStateFlow<String?>(null)
@@ -65,26 +61,25 @@ class StreetListViewModel(
     private val _parkLoading = MutableStateFlow(false)
     val parkLoading: StateFlow<Boolean> = _parkLoading
 
+    private val daytimeOnly = MutableStateFlow(false)
+    private val currentTime = flow {
+        while (true) {
+            val now = ZonedDateTime.now(clock)
+            emit(now)
+            delay(60_000L - now.toInstant().toEpochMilli().mod(60_000L))
+        }
+    }
+
+    fun showDaytimeOnly(enabled: Boolean) { daytimeOnly.value = enabled }
+
     val uiState: StateFlow<HomeUiState> =
         combine(
             streetRepository.observeStreetsWithRules(),
+            currentTime,
+            daytimeOnly,
             parkingRepository.observeActiveSession(),
-        ) { streets, active ->
-            val now = ZonedDateTime.now()
-            // Always rank by how much free time each street has — most useful when choosing
-            // where to park, and still informative when already parked (where to move to next).
-            // Streets with no cleaning hours (park anytime) sort to the very top.
-            val ordered = streets
-                .map { swr -> swr to scheduleEngine.nextWindowStart(swr.rules.map { it.toWindow() }, now) }
-                .sortedByDescending { it.second?.toInstant()?.toEpochMilli() ?: Long.MAX_VALUE }
-            val rows = ordered.map { (swr, next) ->
-                StreetRow(
-                    id = swr.street.id,
-                    name = swr.street.name,
-                    freeFor = next?.let { freeForText(now, it) },
-                    nextCleaningText = next?.let { "cleaning ${it.format(FORMATTER)}" },
-                )
-            }
+        ) { streets, now, daytimeOnly, active ->
+            val rows = buildStreetRows(streets, now, scheduleEngine, daytimeOnly)
             val activeUi = active?.let { session ->
                 val name = streets.firstOrNull { it.street.id == session.streetId }?.street?.name
                     ?: "Unknown street"
@@ -94,14 +89,23 @@ class StreetListViewModel(
                 ActiveParking(
                     sessionId = session.id,
                     streetName = name,
-                    deadlineText = deadline?.format(FORMATTER) ?: "No cleaning deadline",
+                    deadlineText = deadline?.format(parkingTimeFormatter) ?: "No cleaning deadline",
                     remainingText = deadline?.let { remainingText(now, it) } ?: "",
                 )
             }
-            HomeUiState(rows, activeUi)
+            HomeUiState(
+                streets = rows,
+                active = activeUi,
+                daytimeOnly = daytimeOnly,
+                hasSavedStreets = streets.isNotEmpty(),
+            )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
-    fun park(streetId: Long) = viewModelScope.launch { parkingService.park(streetId) }
+    fun park(streetId: Long) = viewModelScope.launch {
+        if (parkingService.park(streetId, parkedAt = clock.instant()) == -1L) {
+            _message.value = "This street isn't available to park on right now"
+        }
+    }
 
     fun endParking(sessionId: Long) = viewModelScope.launch { parkingService.endParking(sessionId) }
 
@@ -132,8 +136,11 @@ class StreetListViewModel(
             }
             val match = streetMatcher.match(location, targets)
             if (match != null) {
-                parkingService.park(match.target.id)
-                _message.value = "Parked on ${match.target.name}"
+                _message.value = if (parkingService.park(match.target.id, parkedAt = clock.instant()) == -1L) {
+                    "${match.target.name} isn't available to park on right now"
+                } else {
+                    "Parked on ${match.target.name}"
+                }
             } else {
                 _message.value = "No saved street nearby — use \"Park here\" on the right one"
             }
@@ -143,25 +150,10 @@ class StreetListViewModel(
     }
 
     companion object {
-        private val FORMATTER = DateTimeFormatter.ofPattern("EEE d MMM, HH:mm", Locale.getDefault())
-
         private fun remainingText(now: ZonedDateTime, deadline: ZonedDateTime): String {
             val d = Duration.between(now, deadline)
-            if (d.isNegative) return "overdue — move now"
+            if (d.isNegative || d.isZero) return "overdue — move now"
             return "in ${freeForText(now, deadline)}"
-        }
-
-        private fun freeForText(now: ZonedDateTime, until: ZonedDateTime): String {
-            val d = Duration.between(now, until)
-            if (d.isNegative || d.isZero) return "0m"
-            val days = d.toDays()
-            val hours = d.toHours() % 24
-            val minutes = d.toMinutes() % 60
-            return when {
-                days > 0 -> "${days}d ${hours}h"
-                hours > 0 -> "${hours}h ${minutes}m"
-                else -> "${minutes}m"
-            }
         }
 
         fun factory(container: AppContainer) = viewModelFactory {
