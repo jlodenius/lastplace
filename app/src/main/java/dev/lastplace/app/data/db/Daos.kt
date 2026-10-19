@@ -68,6 +68,9 @@ interface ParkingSessionDao {
     @Insert
     suspend fun insert(session: ParkingSession): Long
 
+    @Query("UPDATE parking_sessions SET deadline = :deadline WHERE id = :id AND endedAt IS NULL")
+    suspend fun updateDeadline(id: Long, deadline: Long?)
+
     @Query("UPDATE parking_sessions SET endedAt = :endedAt WHERE id = :id")
     suspend fun endSession(id: Long, endedAt: Long)
 }

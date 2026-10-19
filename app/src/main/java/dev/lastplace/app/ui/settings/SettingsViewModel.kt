@@ -9,6 +9,7 @@ import dev.lastplace.app.data.StreetRepository
 import dev.lastplace.app.data.db.toWindow
 import dev.lastplace.app.data.settings.ReminderSettings
 import dev.lastplace.app.data.settings.SettingsRepository
+import dev.lastplace.app.domain.ReminderKind
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -40,11 +41,16 @@ class SettingsViewModel(
         }
     }
 
-    /** Adds or removes an offset, keeping the list sorted descending. */
-    fun toggleOffset(hours: Int) {
-        val current = settings.value.offsetsHours
-        val updated = if (hours in current) current - hours else current + hours
-        viewModelScope.launch { repository.setOffsets(updated.sortedDescending()) }
+    fun toggleOffset(kind: ReminderKind, minutes: Long) {
+        viewModelScope.launch { repository.toggleReminderOffset(kind, minutes) }
+    }
+
+    fun addOffset(kind: ReminderKind, minutes: Long) {
+        viewModelScope.launch { repository.addReminderOffset(kind, minutes) }
+    }
+
+    fun setReminderEnabled(kind: ReminderKind, enabled: Boolean) {
+        viewModelScope.launch { repository.setReminderEnabled(kind, enabled) }
     }
 
     fun setAutoDetect(enabled: Boolean) {
@@ -52,8 +58,6 @@ class SettingsViewModel(
     }
 
     companion object {
-        val OFFSET_OPTIONS = listOf(48, 24, 12, 6, 2)
-
         fun factory(container: AppContainer) = viewModelFactory {
             initializer { SettingsViewModel(container.settingsRepository, container.streetRepository) }
         }

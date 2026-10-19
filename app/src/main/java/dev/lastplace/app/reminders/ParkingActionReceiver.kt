@@ -3,7 +3,6 @@ package dev.lastplace.app.reminders
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import androidx.core.app.NotificationManagerCompat
 import dev.lastplace.app.ParkingApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +21,6 @@ class ParkingActionReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 container.parkingService.endParking(sessionId)
-                NotificationManagerCompat.from(context).cancelAll()
             } finally {
                 pending.finish()
             }

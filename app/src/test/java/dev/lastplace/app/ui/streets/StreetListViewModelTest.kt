@@ -4,6 +4,8 @@ import dev.lastplace.app.data.ParkingRepository
 import dev.lastplace.app.data.StreetRepository
 import dev.lastplace.app.data.db.CleaningRule
 import dev.lastplace.app.data.db.ParkingSession
+import dev.lastplace.app.data.db.PlannedMove
+import dev.lastplace.app.data.db.rulesSignature
 import dev.lastplace.app.data.db.Street
 import dev.lastplace.app.data.db.StreetWithRules
 import dev.lastplace.app.data.settings.ReminderSettings
@@ -13,6 +15,7 @@ import dev.lastplace.app.domain.StreetMatcher
 import dev.lastplace.app.domain.model.LatLng
 import dev.lastplace.app.location.LocationProvider
 import dev.lastplace.app.parking.ParkingService
+import dev.lastplace.app.reminders.ReminderCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +51,7 @@ class StreetListViewModelTest {
     private val location = mock(LocationProvider::class.java)
     private val clock = mock(Clock::class.java)
     private val settings = mock(SettingsRepository::class.java)
+    private val reminders = mock(ReminderCoordinator::class.java)
     private val zone = ZoneId.of("Europe/Stockholm")
     private val dayStreet = StreetWithRules(
         Street(id = 1, name = "Day street", lat = 59.3, lng = 18.0),
@@ -69,13 +73,14 @@ class StreetListViewModelTest {
         `when`(streets.observeStreetsWithRules()).thenReturn(flowOf(listOf(dayStreet, nightStreet)))
         `when`(parking.observeActiveSession()).thenReturn(flowOf(null))
         `when`(settings.settings).thenReturn(flowOf(ReminderSettings()))
+        `when`(reminders.plans).thenReturn(flowOf(emptyList()))
     }
 
     @After
     fun tearDown() { Dispatchers.resetMain() }
 
     private fun viewModel() = StreetListViewModel(
-        streets, parking, service, ScheduleEngine(), StreetMatcher(), location, settings, clock,
+        streets, parking, service, ScheduleEngine(), StreetMatcher(), location, settings, reminders, clock,
     )
 
     @Test
@@ -160,6 +165,37 @@ class StreetListViewModelTest {
         active.value = null
         runCurrent()
         assertTrue(model.uiState.value.reparkingOptions.isEmpty())
+    }
+
+    @Test
+    fun selectedPlanStaysVisibleWhenMissedAndReportsScheduleChangesWithoutMovingCar() = runTest {
+        val session = ParkingSession(3, 2, at(8).toEpochMilli(), at(0).plusSeconds(86400).toEpochMilli(), source = "MANUAL")
+        val active = MutableStateFlow<ParkingSession?>(session)
+        val saved = MutableStateFlow(listOf(dayStreet, nightStreet))
+        val plan = PlannedMove(3, "selected", 1, dayStreet.street.name, at(14).toEpochMilli(), true, dayStreet.rulesSignature())
+        `when`(parking.observeActiveSession()).thenReturn(active)
+        `when`(streets.observeStreetsWithRules()).thenReturn(saved)
+        `when`(reminders.plans).thenReturn(flowOf(listOf(plan)))
+        `when`(settings.settings).thenReturn(flowOf(ReminderSettings(moveRemindersEnabled = false, deadlineWarningsEnabled = false)))
+        val model = viewModel()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
+        runCurrent()
+        assertEquals("selected", model.uiState.value.plannedMove?.plan?.id)
+        assertEquals("Planned move reminders off", model.uiState.value.plannedMove?.remindersText)
+        assertFalse(model.uiState.value.deadlineWarningsEnabled)
+        assertEquals("Night street", model.uiState.value.active?.streetName)
+
+        `when`(clock.instant()).thenReturn(at(14, 2))
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertTrue(model.uiState.value.plannedMove!!.timePassed)
+        assertEquals("selected", model.uiState.value.plannedMove?.plan?.id)
+        saved.value = listOf(nightStreet, dayStreet.copy(rules = dayStreet.rules.map { it.copy(endMinuteOfDay = 16 * 60) }))
+        runCurrent()
+        assertTrue(model.uiState.value.plannedMove!!.problem!!.contains("schedule changed"))
+        active.value = null
+        runCurrent()
+        assertEquals(null, model.uiState.value.plannedMove)
     }
 
     @Test

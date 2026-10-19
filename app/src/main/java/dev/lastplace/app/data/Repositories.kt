@@ -66,5 +66,7 @@ class ParkingRepository(private val dao: ParkingSessionDao) {
         ),
     )
 
+    suspend fun updateDeadline(id: Long, deadline: Instant?) = dao.updateDeadline(id, deadline?.toEpochMilli())
+
     suspend fun endSession(id: Long, endedAt: Instant) = dao.endSession(id, endedAt.toEpochMilli())
 }

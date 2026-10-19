@@ -8,16 +8,21 @@ import dev.lastplace.app.AppContainer
 import dev.lastplace.app.data.ParkingRepository
 import dev.lastplace.app.data.StreetRepository
 import dev.lastplace.app.data.db.GeometryCodec
+import dev.lastplace.app.data.db.PlannedMove
 import dev.lastplace.app.data.db.toWindow
 import dev.lastplace.app.data.settings.SettingsRepository
 import dev.lastplace.app.domain.ReparkingOption
 import dev.lastplace.app.domain.ReparkingPlanner
 import dev.lastplace.app.domain.ReparkingStreet
 import dev.lastplace.app.domain.ScheduleEngine
+import dev.lastplace.app.domain.reminderOffsetLabel
 import dev.lastplace.app.domain.StreetMatcher
 import dev.lastplace.app.domain.model.LatLng
 import dev.lastplace.app.location.LocationProvider
 import dev.lastplace.app.parking.ParkingService
+import dev.lastplace.app.reminders.ReminderCoordinator
+import dev.lastplace.app.reminders.currentDeadline
+import dev.lastplace.app.reminders.planProblem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,12 +48,24 @@ data class ActiveParking(
     val hasDeadline: Boolean,
 )
 
+data class PlannedMoveUi(
+    val plan: PlannedMove,
+    val streetName: String,
+    val timeText: String,
+    val problem: String?,
+    val timePassed: Boolean,
+    val isAvailableNow: Boolean,
+    val remindersText: String,
+)
+
 data class HomeUiState(
     val streets: List<StreetRow> = emptyList(),
     val active: ActiveParking? = null,
     val daytimeOnly: Boolean = false,
     val hasSavedStreets: Boolean = false,
     val reparkingOptions: List<ReparkingOption> = emptyList(),
+    val plannedMove: PlannedMoveUi? = null,
+    val deadlineWarningsEnabled: Boolean = true,
 )
 
 class StreetListViewModel(
@@ -59,6 +76,7 @@ class StreetListViewModel(
     private val streetMatcher: StreetMatcher,
     private val locationProvider: LocationProvider,
     private val settingsRepository: SettingsRepository,
+    private val reminderCoordinator: ReminderCoordinator,
     private val clock: Clock = Clock.systemDefaultZone(),
 ) : ViewModel() {
 
@@ -85,16 +103,16 @@ class StreetListViewModel(
             streetRepository.observeStreetsWithRules(),
             currentTime,
             daytimeOnly,
-            parkingRepository.observeActiveSession(),
+            combine(parkingRepository.observeActiveSession(), reminderCoordinator.plans) { session, plans -> session to plans },
             settingsRepository.settings,
-        ) { streets, now, daytimeOnly, active, settings ->
+        ) { streets, now, daytimeOnly, parkingAndPlans, settings ->
+            val (active, plans) = parkingAndPlans
+            val deadlineInstant = active?.let { currentDeadline(it, streets, scheduleEngine, now.zone) }
             val rows = buildStreetRows(streets, now, scheduleEngine, daytimeOnly)
             val activeUi = active?.let { session ->
                 val name = streets.firstOrNull { it.street.id == session.streetId }?.street?.name
                     ?: "Unknown street"
-                val deadline = session.deadline?.let {
-                    Instant.ofEpochMilli(it).atZone(now.zone)
-                }
+                val deadline = deadlineInstant?.atZone(now.zone)
                 ActiveParking(
                     sessionId = session.id,
                     streetName = name,
@@ -108,6 +126,28 @@ class StreetListViewModel(
                 active = activeUi,
                 daytimeOnly = daytimeOnly,
                 hasSavedStreets = streets.isNotEmpty(),
+                deadlineWarningsEnabled = settings.deadlineWarningsEnabled && settings.deadlineOffsetsMinutes.isNotEmpty(),
+                plannedMove = active?.let { session ->
+                    plans.firstOrNull { it.sessionId == session.id }?.let { plan ->
+                        val target = streets.firstOrNull { it.street.id == plan.streetId }
+                        val problem = planProblem(plan, session, streets, scheduleEngine, now.zone)
+                        val upcomingOffsets = settings.moveOffsetsMinutes.filter { plan.moveAt - it * 60_000 > now.toInstant().toEpochMilli() }
+                        PlannedMoveUi(
+                            plan = plan,
+                            streetName = target?.street?.name ?: plan.streetName,
+                            timeText = Instant.ofEpochMilli(plan.moveAt).atZone(now.zone).format(parkingTimeFormatter),
+                            problem = problem,
+                            timePassed = now.toInstant().toEpochMilli() >= plan.moveAt + 60_000,
+                            isAvailableNow = target?.let { scheduleEngine.availability(it.rules.map { rule -> rule.toWindow() }, now).isAvailable } ?: false,
+                            remindersText = when {
+                                problem != null -> "Plan reminders cancelled"
+                                !settings.moveRemindersEnabled || settings.moveOffsetsMinutes.isEmpty() -> "Planned move reminders off"
+                                upcomingOffsets.isEmpty() -> "No upcoming plan reminders"
+                                else -> "Reminders: ${upcomingOffsets.sortedDescending().joinToString { reminderOffsetLabel(it) }}"
+                            },
+                        )
+                    }
+                },
                 reparkingOptions = active?.let { session ->
                     reparkingPlanner.options(
                         streets = streets.map {
@@ -119,7 +159,7 @@ class StreetListViewModel(
                             )
                         },
                         currentStreetId = session.streetId,
-                        deadline = session.deadline?.let { Instant.ofEpochMilli(it).atZone(now.zone) },
+                        deadline = deadlineInstant?.atZone(now.zone),
                         preferredTimes = settings.preferredReparkingTimes,
                         now = now,
                     )
@@ -130,6 +170,24 @@ class StreetListViewModel(
     fun park(streetId: Long) = viewModelScope.launch {
         if (parkingService.park(streetId, parkedAt = clock.instant()) == -1L) {
             _message.value = "This street isn't available to park on right now"
+        }
+    }
+
+    fun selectPlan(option: ReparkingOption) = viewModelScope.launch {
+        val session = uiState.value.active ?: return@launch
+        val selected = reminderCoordinator.selectPlan(session.sessionId, option.street.id, option.moveAt.toInstant(), option.justCleaned)
+        _message.value = if (selected) "Move planned. Your current parking has not changed."
+            else "That opportunity is no longer available. Please choose again."
+    }
+
+    fun cancelPlan() = viewModelScope.launch {
+        uiState.value.plannedMove?.plan?.let { reminderCoordinator.cancelPlan(it.sessionId, it.id) }
+    }
+
+    fun arriveAtPlan() = viewModelScope.launch {
+        val plan = uiState.value.plannedMove?.plan ?: return@launch
+        if (parkingService.arriveAtPlan(plan.sessionId, plan.id, clock.instant()) == -1L) {
+            _message.value = "The plan changed or the destination is unavailable now."
         }
     }
 
@@ -194,6 +252,7 @@ class StreetListViewModel(
                     streetMatcher = container.streetMatcher,
                     locationProvider = container.locationProvider,
                     settingsRepository = container.settingsRepository,
+                    reminderCoordinator = container.reminderCoordinator,
                 )
             }
         }

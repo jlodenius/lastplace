@@ -1,7 +1,6 @@
 package dev.lastplace.app.ui.settings
 
 import android.widget.Toast
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -15,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -37,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.lastplace.app.ParkingApp
+import dev.lastplace.app.domain.ReminderKind
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -88,26 +87,26 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-            Text("Remind me before the deadline", fontWeight = FontWeight.Bold)
+            ReminderPreferences(
+                kind = ReminderKind.PLANNED_MOVE,
+                title = "Planned move reminders",
+                description = "Remind me about the re-parking plan I selected. Times are relative to that move, not cleaning on my current street.",
+                settings = settings,
+                viewModel = viewModel,
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            ReminderPreferences(
+                kind = ReminderKind.PARKING_DEADLINE,
+                title = "Parking deadline warnings",
+                description = "Warn me before cleaning starts where I am currently parked, independently of any move plan.",
+                settings = settings,
+                viewModel = viewModel,
+            )
             Text(
-                "Pick how far ahead to be warned.",
+                "Each category supports multiple reminders. Times already passed are skipped. Both categories can be turned off.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            SettingsViewModel.OFFSET_OPTIONS.forEach { hours ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { viewModel.toggleOffset(hours) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(
-                        checked = hours in settings.offsetsHours,
-                        onCheckedChange = { viewModel.toggleOffset(hours) },
-                    )
-                    Text("${hours}h before")
-                }
-            }
+            ReminderDeliverySettings(container.reminderScheduler)
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 

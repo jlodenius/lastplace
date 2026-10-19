@@ -19,15 +19,35 @@ private val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS planned_moves (
+                sessionId INTEGER NOT NULL PRIMARY KEY, id TEXT NOT NULL,
+                streetId INTEGER NOT NULL, streetName TEXT NOT NULL, moveAt INTEGER NOT NULL,
+                justCleaned INTEGER NOT NULL, rulesSignature TEXT NOT NULL, invalidReason TEXT
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS scheduled_reminders (
+                `key` TEXT NOT NULL PRIMARY KEY, sessionId INTEGER NOT NULL, kind TEXT NOT NULL,
+                targetAt INTEGER NOT NULL, fireAt INTEGER NOT NULL, offsetMinutes INTEGER NOT NULL,
+                streetName TEXT NOT NULL, planId TEXT, delivered INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+    }
+}
+
 @Database(
-    entities = [Street::class, CleaningRule::class, ParkingSession::class],
-    version = 3,
+    entities = [Street::class, CleaningRule::class, ParkingSession::class, PlannedMove::class, ScheduledReminder::class],
+    version = 4,
     exportSchema = false,
 )
 abstract class ParkingDatabase : RoomDatabase() {
 
     abstract fun streetDao(): StreetDao
     abstract fun parkingSessionDao(): ParkingSessionDao
+    abstract fun reminderDao(): ReminderDao
 
     companion object {
         @Volatile
@@ -39,7 +59,7 @@ abstract class ParkingDatabase : RoomDatabase() {
                     context.applicationContext,
                     ParkingDatabase::class.java,
                     "parking.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
             }
     }
 }

@@ -14,6 +14,12 @@ import dev.lastplace.app.osm.OsmService
 import dev.lastplace.app.parking.ParkingService
 import dev.lastplace.app.reminders.Notifications
 import dev.lastplace.app.reminders.ReminderScheduler
+import dev.lastplace.app.reminders.ReminderCoordinator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 
 /**
  * Manual dependency container. Small enough that Hilt isn't worth the build cost yet;
@@ -34,13 +40,27 @@ class AppContainer(context: Context) {
     val locationProvider = LocationProvider(context)
 
     val reminderScheduler = ReminderScheduler(context)
+    val reminderCoordinator = ReminderCoordinator(
+        database.reminderDao(), parkingRepository, streetRepository, settingsRepository, reminderScheduler, scheduleEngine,
+    )
     val parkingService = ParkingService(
         streetRepository = streetRepository,
         parkingRepository = parkingRepository,
-        settingsRepository = settingsRepository,
         deadlineCalculator = deadlineCalculator,
+        reminderCoordinator = reminderCoordinator,
         reminderScheduler = reminderScheduler,
     )
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun observeReminderChanges() {
+        scope.launch {
+            combine(
+                streetRepository.observeStreetsWithRules(), parkingRepository.observeActiveSession(),
+                settingsRepository.settings, reminderCoordinator.plans,
+            ) { _, _, _, _ -> Unit }.collect { reminderCoordinator.refresh() }
+        }
+    }
 }
 
 class ParkingApp : Application() {
@@ -51,5 +71,6 @@ class ParkingApp : Application() {
         super.onCreate()
         container = AppContainer(this)
         Notifications.createChannels(this)
+        container.observeReminderChanges()
     }
 }

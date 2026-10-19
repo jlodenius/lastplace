@@ -1,5 +1,6 @@
 package dev.lastplace.app.ui.streets
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,8 +20,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,6 +41,14 @@ fun ReparkingOptionsScreen(onBack: () -> Unit) {
     val container = (LocalContext.current.applicationContext as ParkingApp).container
     val viewModel: StreetListViewModel = viewModel(factory = StreetListViewModel.factory(container))
     val state by viewModel.uiState.collectAsState()
+    val message by viewModel.message.collectAsState()
+    val context = LocalContext.current
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearMessage()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -80,6 +91,15 @@ fun ReparkingOptionsScreen(onBack: () -> Unit) {
                     }
                 }
             }
+            state.plannedMove?.let { plan ->
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            PlannedMoveDetails(plan, { viewModel.cancelPlan() }, { viewModel.arriveAtPlan() })
+                        }
+                    }
+                }
+            }
             itemsIndexed(state.reparkingOptions, key = { _, option -> option.street.id }) { index, option ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -88,13 +108,21 @@ fun ReparkingOptionsScreen(onBack: () -> Unit) {
                             fontWeight = FontWeight.Bold,
                         )
                         ReparkingOptionDetails(option)
+                        val selected = state.plannedMove?.let {
+                            it.problem == null && it.plan.streetId == option.street.id &&
+                                it.plan.justCleaned == option.justCleaned &&
+                                (if (option.justCleaned) it.plan.moveAt == option.moveAt.toInstant().toEpochMilli() else !it.timePassed)
+                        } == true
+                        TextButton(enabled = !selected, onClick = { viewModel.selectPlan(option) }) {
+                            Text(if (selected) "Selected plan" else if (option.justCleaned) "Plan this move" else "Plan move now")
+                        }
                     }
                 }
             }
             if (state.reparkingOptions.isNotEmpty()) {
                 item {
                     Text(
-                        "Favourites break ties only. Availability is based on saved schedules, not live parking spaces. After moving, use Park here in My streets.",
+                        "Selecting a plan does not register parking. Confirm after you have moved. Availability is based on saved schedules, not live parking spaces.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

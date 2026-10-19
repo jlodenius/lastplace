@@ -30,11 +30,26 @@ move your car before the next cleaning window.
   fallback is the longest-stay street available now. **View re-parking options** shows up to three
   distinct destinations without changing the main list. Recommendations refresh automatically;
   future plans are not current availability, and saved schedules cannot guarantee an empty space.
+- **Select a planned move** — tap **Plan this move** on a suggestion or one of the top three
+  options. The destination and time stay fixed until you change or cancel the plan, even if
+  preferences or favourites change. Planning does not register parking: tap **I've parked here**
+  only after moving. Schedule changes or a removed destination mark the plan as needing attention
+  and cancel its reminders. Missed plans remain visible; they never silently move your car.
 - **Park in one tap** — "Park where I am" uses your location to detect which saved street
   you're on, or pick one manually.
-- **Get reminded in time** — a notification fires a configurable number of hours before
-  cleaning starts, telling you which street you're on and how long you have. Tap
-  "I moved it" to clear it.
+- **Choose independent reminders** — enable either or both **Planned move reminders** and
+  **Parking deadline warnings**, or turn both off. Each supports multiple presets and custom
+  offsets in minutes, hours, or days (up to 365 days); zero means at the time. For example, remind
+  yourself 1 hour and 10 minutes before your chosen move, independently of 2-day and 1-day cleaning
+  warnings. Move reminders default to at the planned time; existing deadline settings are retained.
+  Past offsets are skipped when selecting a plan or adding reminders. Selecting an available-now
+  fallback can send its at-time reminder immediately, without inventing a future availability.
+- **Keep reminders in sync** — changes to plans, schedules and settings update alarms immediately.
+  Changing or cancelling a plan leaves deadline warnings alone. Ending parking clears that session's
+  plan and alarms. Pending reminders are restored after reboot or an app update; stale and duplicate
+  alarms are checked before delivery. Undelivered move reminders more than 15 minutes past the
+  planned time are suppressed. Android notification and precise-alarm restrictions are shown in
+  Settings; system restrictions can delay or block delivery.
 
 Everything is stored locally on your device — no account, no servers.
 

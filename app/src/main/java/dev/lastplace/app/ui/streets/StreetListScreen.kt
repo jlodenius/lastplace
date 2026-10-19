@@ -115,6 +115,11 @@ fun StreetListScreen(
                         recommendation = state.reparkingOptions.firstOrNull(),
                         onMoved = { viewModel.endParking(active.sessionId) },
                         onOpenOptions = onOpenReparkingOptions,
+                        plannedMove = state.plannedMove,
+                        deadlineWarningsEnabled = state.deadlineWarningsEnabled,
+                        onPlan = { state.reparkingOptions.firstOrNull()?.let(viewModel::selectPlan) },
+                        onCancelPlan = { viewModel.cancelPlan() },
+                        onArrived = { viewModel.arriveAtPlan() },
                     )
                 }
 
@@ -287,6 +292,11 @@ private fun ActiveParkingCard(
     recommendation: ReparkingOption?,
     onMoved: () -> Unit,
     onOpenOptions: () -> Unit,
+    plannedMove: PlannedMoveUi?,
+    deadlineWarningsEnabled: Boolean,
+    onPlan: () -> Unit,
+    onCancelPlan: () -> Unit,
+    onArrived: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -296,13 +306,21 @@ private fun ActiveParkingCard(
             Text("Parked on ${active.streetName}", fontWeight = FontWeight.Bold)
             Text(if (active.hasDeadline) "Move before ${active.deadlineText}" else active.deadlineText)
             Text(active.remainingText, style = MaterialTheme.typography.bodyMedium)
-            if (recommendation != null) {
+            if (!deadlineWarningsEnabled) {
+                Text("Parking deadline warnings off", style = MaterialTheme.typography.bodySmall)
+            }
+            if (plannedMove != null) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                PlannedMoveDetails(plannedMove, onCancelPlan, onArrived)
+                TextButton(onClick = onOpenOptions) { Text("Change plan / view options") }
+            } else if (recommendation != null) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                 Text(
                     if (recommendation.justCleaned) "Suggested easy re-park" else "Best alternative · longest stay",
                     fontWeight = FontWeight.Bold,
                 )
                 ReparkingOptionDetails(recommendation)
+                TextButton(onClick = onPlan) { Text(if (recommendation.justCleaned) "Plan this move" else "Plan move now") }
                 TextButton(onClick = onOpenOptions) { Text("View re-parking options") }
             } else if (active.hasDeadline) {
                 Text("No other saved street is available. Move before your deadline.", modifier = Modifier.padding(top = 8.dp))
@@ -311,7 +329,7 @@ private fun ActiveParkingCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                Button(onClick = onMoved) { Text("I moved it") }
+                Button(onClick = onMoved) { Text(if (plannedMove == null) "I moved it" else "End current parking") }
             }
         }
     }
