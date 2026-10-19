@@ -19,6 +19,27 @@ interface StreetDao {
     @Query("SELECT * FROM streets WHERE id = :id")
     suspend fun getStreetWithRules(id: Long): StreetWithRules?
 
+    @Transaction
+    @Query("SELECT * FROM streets ORDER BY name")
+    suspend fun getStreetsWithRules(): List<StreetWithRules>
+
+    @Query("UPDATE streets SET isFavourite = NOT isFavourite WHERE id = :id")
+    suspend fun toggleFavourite(id: Long)
+
+    @Transaction
+    suspend fun insertStreetWithRules(street: Street, rules: List<CleaningRule>) {
+        val streetId = insertStreet(street)
+        rules.forEach { insertRule(it.copy(streetId = streetId)) }
+    }
+
+    @Transaction
+    suspend fun updateStreetWithRules(street: Street, rules: List<CleaningRule>) {
+        val existing = getStreetWithRules(street.id) ?: return
+        updateStreet(street.copy(isFavourite = existing.street.isFavourite))
+        deleteRulesForStreet(street.id)
+        rules.forEach { insertRule(it.copy(streetId = street.id)) }
+    }
+
     @Insert
     suspend fun insertStreet(street: Street): Long
 

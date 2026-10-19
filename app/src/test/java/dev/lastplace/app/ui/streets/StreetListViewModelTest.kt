@@ -6,6 +6,8 @@ import dev.lastplace.app.data.db.CleaningRule
 import dev.lastplace.app.data.db.ParkingSession
 import dev.lastplace.app.data.db.Street
 import dev.lastplace.app.data.db.StreetWithRules
+import dev.lastplace.app.data.settings.ReminderSettings
+import dev.lastplace.app.data.settings.SettingsRepository
 import dev.lastplace.app.domain.ScheduleEngine
 import dev.lastplace.app.domain.StreetMatcher
 import dev.lastplace.app.domain.model.LatLng
@@ -13,6 +15,7 @@ import dev.lastplace.app.location.LocationProvider
 import dev.lastplace.app.parking.ParkingService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -32,6 +35,7 @@ import org.junit.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import java.time.Clock
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -43,6 +47,7 @@ class StreetListViewModelTest {
     private val service = mock(ParkingService::class.java)
     private val location = mock(LocationProvider::class.java)
     private val clock = mock(Clock::class.java)
+    private val settings = mock(SettingsRepository::class.java)
     private val zone = ZoneId.of("Europe/Stockholm")
     private val dayStreet = StreetWithRules(
         Street(id = 1, name = "Day street", lat = 59.3, lng = 18.0),
@@ -63,13 +68,14 @@ class StreetListViewModelTest {
         `when`(clock.instant()).thenReturn(at(8, 59, 59))
         `when`(streets.observeStreetsWithRules()).thenReturn(flowOf(listOf(dayStreet, nightStreet)))
         `when`(parking.observeActiveSession()).thenReturn(flowOf(null))
+        `when`(settings.settings).thenReturn(flowOf(ReminderSettings()))
     }
 
     @After
     fun tearDown() { Dispatchers.resetMain() }
 
     private fun viewModel() = StreetListViewModel(
-        streets, parking, service, ScheduleEngine(), StreetMatcher(), location, clock,
+        streets, parking, service, ScheduleEngine(), StreetMatcher(), location, settings, clock,
     )
 
     @Test
@@ -108,6 +114,52 @@ class StreetListViewModelTest {
         model.showDaytimeOnly(false)
         runCurrent()
         assertEquals(2, model.uiState.value.streets.size)
+    }
+
+    @Test
+    fun recommendationsReactToParkingPreferencesSchedulesFavouritesAndTime() = runTest {
+        val savedStreets = MutableStateFlow(listOf(dayStreet, nightStreet))
+        val preferences = MutableStateFlow(ReminderSettings())
+        val session = ParkingSession(
+            id = 3, streetId = 2, parkedAt = at(8).toEpochMilli(),
+            deadline = at(0).plusSeconds(24 * 3600).toEpochMilli(), source = "MANUAL",
+        )
+        val active = MutableStateFlow<ParkingSession?>(null)
+        `when`(streets.observeStreetsWithRules()).thenReturn(savedStreets)
+        `when`(settings.settings).thenReturn(preferences)
+        `when`(parking.observeActiveSession()).thenReturn(active)
+        val model = viewModel()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
+        runCurrent()
+        assertTrue(model.uiState.value.reparkingOptions.isEmpty())
+
+        active.value = session
+        runCurrent()
+        assertFalse(model.uiState.value.reparkingOptions.single().justCleaned)
+        preferences.value = ReminderSettings(preferredReparkingTimes = setOf(LocalTime.of(14, 0)))
+        runCurrent()
+        assertTrue(model.uiState.value.reparkingOptions.single().justCleaned)
+
+        savedStreets.value += dayStreet.copy(street = dayStreet.street.copy(id = 4, name = "Favourite", isFavourite = true))
+        runCurrent()
+        assertEquals(listOf(4L, 1L), model.uiState.value.reparkingOptions.map { it.street.id })
+        assertEquals(listOf(2L, 4L, 1L), model.uiState.value.streets.map { it.id })
+
+        model.showDaytimeOnly(true)
+        runCurrent()
+        assertEquals(2, model.uiState.value.reparkingOptions.size)
+        savedStreets.value = listOf(nightStreet, dayStreet.copy(rules = dayStreet.rules.map { it.copy(dayOfWeek = 5) }))
+        runCurrent()
+        assertFalse(model.uiState.value.reparkingOptions.single().justCleaned)
+
+        savedStreets.value = listOf(dayStreet, nightStreet)
+        `when`(clock.instant()).thenReturn(at(14, 1))
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertFalse(model.uiState.value.reparkingOptions.single().justCleaned)
+        active.value = null
+        runCurrent()
+        assertTrue(model.uiState.value.reparkingOptions.isEmpty())
     }
 
     @Test

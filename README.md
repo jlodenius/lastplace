@@ -19,6 +19,17 @@ move your car before the next cleaning window.
   within **08:00–18:00** (such as 09:00–14:00), with their weekdays and hours. Tap
   **Daytime cleaning** to show only streets with at least one such window. The badge describes
   the schedule, not current parking availability; other cleaning windows still apply.
+- **Favourite nearby streets** — tap the small star beside a street. Favourites break exact ties
+  in both the main list and re-parking suggestions; better parking opportunities still rank first.
+- **Choose preferred re-parking times** — Settings shows the distinct cleaning end times across
+  your saved streets. Tap to select any number of times. Choices update when streets change;
+  new times start unselected, and removed times lose their selection.
+- **Plan an easy re-park** — while parked, your parking card recommends the latest preferred
+  cleaning-end opportunity before your current deadline. Only genuinely just-cleaned streets
+  qualify. Equal-time opportunities rank by longest stay, then favourites. If none remain, the
+  fallback is the longest-stay street available now. **View re-parking options** shows up to three
+  distinct destinations without changing the main list. Recommendations refresh automatically;
+  future plans are not current availability, and saved schedules cannot guarantee an empty space.
 - **Park in one tap** — "Park where I am" uses your location to detect which saved street
   you're on, or pick one manually.
 - **Get reminded in time** — a notification fires a configurable number of hours before

@@ -64,6 +64,32 @@ class StreetRowsTest {
     }
 
     @Test
+    fun favouritesBreakExactTiesWithoutOverridingAvailabilityOrParkingDuration() {
+        fun favourite(street: StreetWithRules) = street.copy(street = street.street.copy(isFavourite = true))
+        val streets = listOf(
+            street(1, rule(day = 5)),
+            favourite(street(2, rule(day = 5))),
+            favourite(street(3, rule(day = 3))),
+            favourite(street(4, rule())),
+            street(5),
+            favourite(street(6)),
+        )
+        val rows = buildStreetRows(streets, at(10), engine, false)
+        assertEquals(listOf(6L, 5L, 2L, 1L, 3L, 4L), rows.map { it.id })
+        assertTrue(rows.first().isFavourite)
+        assertFalse(rows[1].isFavourite)
+    }
+
+    @Test
+    fun favouritesDoNotMoveLaterOpeningStreetsAheadOfEarlierOnes() {
+        val earlier = street(1, rule())
+        val tied = street(2, rule()).let { it.copy(street = it.street.copy(isFavourite = true)) }
+        val later = street(3, rule(end = 16 * 60)).let { it.copy(street = it.street.copy(isFavourite = true)) }
+        val rows = buildStreetRows(listOf(earlier, later, tied), at(10), engine, false)
+        assertEquals(listOf(2L, 1L, 3L), rows.map { it.id })
+    }
+
+    @Test
     fun daytimeFilterIncludesAnyDaytimeWindowRegardlessOfWeekdayOrCurrentAvailability() {
         val streets = listOf(
             street(1, rule()),

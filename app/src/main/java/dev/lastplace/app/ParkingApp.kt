@@ -26,9 +26,9 @@ class AppContainer(context: Context) {
     val deadlineCalculator = DeadlineCalculator(scheduleEngine)
     val streetMatcher = StreetMatcher()
 
-    val streetRepository = StreetRepository(database.streetDao())
-    val parkingRepository = ParkingRepository(database.parkingSessionDao())
     val settingsRepository = SettingsRepository(context)
+    val streetRepository = StreetRepository(database.streetDao(), settingsRepository)
+    val parkingRepository = ParkingRepository(database.parkingSessionDao())
 
     val osmService = OsmService()
     val locationProvider = LocationProvider(context)

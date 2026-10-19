@@ -11,11 +11,13 @@ import dev.lastplace.app.ui.addstreet.AddStreetScreen
 import dev.lastplace.app.ui.map.MapPickerResult
 import dev.lastplace.app.ui.map.MapPickerScreen
 import dev.lastplace.app.ui.settings.SettingsScreen
+import dev.lastplace.app.ui.streets.ReparkingOptionsScreen
 import dev.lastplace.app.ui.streets.StreetListScreen
 
 object Routes {
     const val STREETS = "streets"
     const val SETTINGS = "settings"
+    const val REPARKING_OPTIONS = "reparking_options"
     const val ADD_STREET = "add_street"
     const val MAP_PICKER = "map_picker"
     const val ARG_STREET_ID = "streetId"
@@ -32,6 +34,7 @@ fun ParkingNavHost() {
                 onAddStreet = { navController.navigate(Routes.editStreet(-1L)) },
                 onEditStreet = { id -> navController.navigate(Routes.editStreet(id)) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenReparkingOptions = { navController.navigate(Routes.REPARKING_OPTIONS) },
             )
         }
         composable(
@@ -72,6 +75,9 @@ fun ParkingNavHost() {
                 },
                 onBack = { navController.popBackStack() },
             )
+        }
+        composable(Routes.REPARKING_OPTIONS) {
+            ReparkingOptionsScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { navController.popBackStack() })

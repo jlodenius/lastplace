@@ -1,5 +1,6 @@
 package dev.lastplace.app.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -21,6 +22,7 @@ data class Street(
     val notes: String? = null,
     /** OSM polyline(s), encoded by [GeometryCodec]; null when only a point is known. */
     val geometry: String? = null,
+    @ColumnInfo(defaultValue = "0") val isFavourite: Boolean = false,
 ) : GeoStreet
 
 @Entity(

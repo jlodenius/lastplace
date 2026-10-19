@@ -18,6 +18,7 @@ data class StreetRow(
     val nextCleaningText: String?,
     val unavailableUntilText: String?,
     val daytimeCleaningText: String?,
+    val isFavourite: Boolean = false,
 ) {
     val isAvailable: Boolean get() = unavailableUntilText == null
     val hasDaytimeCleaning: Boolean get() = daytimeCleaningText != null
@@ -39,7 +40,8 @@ internal fun buildStreetRows(
 }.sortedWith(
     compareBy<ScheduledStreet> { !it.availability.isAvailable }
         .thenBy { it.availability.availableAt }
-        .thenByDescending { it.availability.nextCleaningStart?.toInstant()?.toEpochMilli() ?: Long.MAX_VALUE },
+        .thenByDescending { it.availability.nextCleaningStart?.toInstant()?.toEpochMilli() ?: Long.MAX_VALUE }
+        .thenByDescending { it.street.street.isFavourite },
 ).map { (street, windows, availability) ->
     val daytimeWindows = windows.filter { it.isDaytime }.sortedWith(compareBy({ it.dayOfWeek }, { it.start }))
     val daytimeText = daytimeWindows.takeIf { it.isNotEmpty() }?.joinToString(" · ") {
@@ -53,6 +55,7 @@ internal fun buildStreetRows(
             ?.let { "cleaning ${it.format(parkingTimeFormatter)}" },
         unavailableUntilText = availability.availableAt?.format(parkingTimeFormatter),
         daytimeCleaningText = daytimeText,
+        isFavourite = street.street.isFavourite,
     )
 }
 

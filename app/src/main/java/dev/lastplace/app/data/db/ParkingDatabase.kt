@@ -13,9 +13,15 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE streets ADD COLUMN isFavourite INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [Street::class, CleaningRule::class, ParkingSession::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ParkingDatabase : RoomDatabase() {
@@ -33,7 +39,7 @@ abstract class ParkingDatabase : RoomDatabase() {
                     context.applicationContext,
                     ParkingDatabase::class.java,
                     "parking.db",
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
     }
 }

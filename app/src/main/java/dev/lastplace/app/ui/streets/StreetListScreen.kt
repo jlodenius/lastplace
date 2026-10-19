@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -55,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.lastplace.app.ParkingApp
+import dev.lastplace.app.domain.ReparkingOption
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +66,7 @@ fun StreetListScreen(
     onAddStreet: () -> Unit,
     onEditStreet: (Long) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenReparkingOptions: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = (context.applicationContext as ParkingApp).container
@@ -99,103 +104,125 @@ fun StreetListScreen(
             }
         },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            state.active?.let { active ->
-                ActiveParkingCard(active = active, onMoved = { viewModel.endParking(active.sessionId) })
-            }
-
-            if (state.active == null) {
-                ExtendedFloatingActionButton(
-                    text = { Text(if (parkLoading) "Detecting…" else "Park where I am") },
-                    icon = {
-                        if (parkLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Icon(Icons.Filled.LocationOn, contentDescription = null)
-                        }
-                    },
-                    onClick = {
-                        if (!parkLoading) {
-                            if (container.locationProvider.hasPermission()) viewModel.parkWhereIAm()
-                            else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                )
-            }
-
-            if (state.hasSavedStreets) {
-                Row(
-                    modifier = Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilterChip(
-                        selected = !state.daytimeOnly,
-                        onClick = { viewModel.showDaytimeOnly(false) },
-                        label = { Text("All streets") },
-                    )
-                    FilterChip(
-                        selected = state.daytimeOnly,
-                        onClick = { viewModel.showDaytimeOnly(!state.daytimeOnly) },
-                        label = { Text("Daytime cleaning") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Filled.WbSunny,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        },
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(bottom = 88.dp),
+        ) {
+            item {
+                state.active?.let { active ->
+                    ActiveParkingCard(
+                        active = active,
+                        recommendation = state.reparkingOptions.firstOrNull(),
+                        onMoved = { viewModel.endParking(active.sessionId) },
+                        onOpenOptions = onOpenReparkingOptions,
                     )
                 }
-                Text(
-                    "Daytime cleaning: within 08:00–18:00",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+
+                if (state.active == null) {
+                    ExtendedFloatingActionButton(
+                        text = { Text(if (parkLoading) "Detecting…" else "Park where I am") },
+                        icon = {
+                            if (parkLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(Icons.Filled.LocationOn, contentDescription = null)
+                            }
+                        },
+                        onClick = {
+                            if (!parkLoading) {
+                                if (container.locationProvider.hasPermission()) viewModel.parkWhereIAm()
+                                else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    )
+                }
+
+                if (state.hasSavedStreets) {
+                    Row(
+                        modifier = Modifier
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = !state.daytimeOnly,
+                            onClick = { viewModel.showDaytimeOnly(false) },
+                            label = { Text("All streets") },
+                        )
+                        FilterChip(
+                            selected = state.daytimeOnly,
+                            onClick = { viewModel.showDaytimeOnly(!state.daytimeOnly) },
+                            label = { Text("Daytime cleaning") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.WbSunny,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                        )
+                    }
+                    Text(
+                        "Daytime cleaning: within 08:00–18:00",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             if (state.streets.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (state.hasSavedStreets) "No streets with daytime cleaning."
-                        else "No streets yet. Tap + to add one.",
-                    )
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (state.hasSavedStreets) "No streets with daytime cleaning."
+                            else "No streets yet. Tap + to add one.",
+                        )
+                    }
                 }
             } else {
-                LazyColumn {
-                    items(state.streets, key = { it.id }) { row ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onEditStreet(row.id) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(row.name, style = MaterialTheme.typography.bodyLarge)
-                                Spacer(Modifier.height(2.dp))
-                                StreetSubtitle(row)
-                                row.daytimeCleaningText?.let { times ->
-                                    Spacer(Modifier.height(6.dp))
-                                    DaytimeCleaningBadge(times)
+                items(state.streets, key = { it.id }) { row ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onEditStreet(row.id) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(row.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                                IconButton(onClick = { viewModel.toggleFavourite(row.id) }) {
+                                    Icon(
+                                        if (row.isFavourite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                        contentDescription = if (row.isFavourite) {
+                                            "Remove ${row.name} from favourites"
+                                        } else "Favourite ${row.name}",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
-                            TextButton(
-                                onClick = { viewModel.park(row.id) },
-                                enabled = row.isAvailable,
-                            ) { Text("Park here") }
+                            Spacer(Modifier.height(2.dp))
+                            StreetSubtitle(row)
+                            row.daytimeCleaningText?.let { times ->
+                                Spacer(Modifier.height(6.dp))
+                                DaytimeCleaningBadge(times)
+                            }
                         }
-                        HorizontalDivider()
+                        TextButton(
+                            onClick = { viewModel.park(row.id) },
+                            enabled = row.isAvailable,
+                        ) { Text("Park here") }
                     }
+                    HorizontalDivider()
                 }
             }
         }
@@ -255,15 +282,31 @@ private fun LaunchedEffectMessage(message: String?, onShow: (String) -> Unit) {
 }
 
 @Composable
-private fun ActiveParkingCard(active: ActiveParking, onMoved: () -> Unit) {
+private fun ActiveParkingCard(
+    active: ActiveParking,
+    recommendation: ReparkingOption?,
+    onMoved: () -> Unit,
+    onOpenOptions: () -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Parked on ${active.streetName}", fontWeight = FontWeight.Bold)
-            Text("Move by ${active.deadlineText}")
+            Text(if (active.hasDeadline) "Move before ${active.deadlineText}" else active.deadlineText)
             Text(active.remainingText, style = MaterialTheme.typography.bodyMedium)
+            if (recommendation != null) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                Text(
+                    if (recommendation.justCleaned) "Suggested easy re-park" else "Best alternative · longest stay",
+                    fontWeight = FontWeight.Bold,
+                )
+                ReparkingOptionDetails(recommendation)
+                TextButton(onClick = onOpenOptions) { Text("View re-parking options") }
+            } else if (active.hasDeadline) {
+                Text("No other saved street is available. Move before your deadline.", modifier = Modifier.padding(top = 8.dp))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.End,
