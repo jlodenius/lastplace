@@ -35,6 +35,9 @@ move your car before the next cleaning window.
   preferences or favourites change. Planning does not register parking: tap **I've parked here**
   only after moving. Schedule changes or a removed destination mark the plan as needing attention
   and cancel its reminders. Missed plans remain visible; they never silently move your car.
+  The options view integrates the selected plan into its street's card, alongside up to two
+  alternatives. A changed opportunity on the same street stays in that card without replacing
+  your chosen time until you explicitly select it.
 - **Park in one tap** — "Park where I am" uses your location to detect which saved street
   you're on, or pick one manually.
 - **Choose independent reminders** — enable either or both **Planned move reminders** and

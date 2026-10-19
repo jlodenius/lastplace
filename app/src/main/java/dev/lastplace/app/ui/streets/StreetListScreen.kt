@@ -311,8 +311,7 @@ private fun ActiveParkingCard(
             }
             if (plannedMove != null) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                PlannedMoveDetails(plannedMove, onCancelPlan, onArrived)
-                TextButton(onClick = onOpenOptions) { Text("Change plan / view options") }
+                PlannedMoveDetails(plannedMove, onCancelPlan, onArrived, onChangePlan = onOpenOptions)
             } else if (recommendation != null) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                 Text(
@@ -325,11 +324,17 @@ private fun ActiveParkingCard(
             } else if (active.hasDeadline) {
                 Text("No other saved street is available. Move before your deadline.", modifier = Modifier.padding(top = 8.dp))
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                Button(onClick = onMoved) { Text(if (plannedMove == null) "I moved it" else "End current parking") }
+            if (plannedMove != null) {
+                TextButton(onClick = onMoved, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text("End current parking")
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Button(onClick = onMoved) { Text("I moved it") }
+                }
             }
         }
     }

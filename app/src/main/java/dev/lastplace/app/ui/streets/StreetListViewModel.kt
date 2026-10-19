@@ -55,7 +55,8 @@ data class PlannedMoveUi(
     val problem: String?,
     val timePassed: Boolean,
     val isAvailableNow: Boolean,
-    val remindersText: String,
+    val remindersText: String?,
+    val isFavourite: Boolean = false,
 )
 
 data class HomeUiState(
@@ -132,6 +133,7 @@ class StreetListViewModel(
                         val target = streets.firstOrNull { it.street.id == plan.streetId }
                         val problem = planProblem(plan, session, streets, scheduleEngine, now.zone)
                         val upcomingOffsets = settings.moveOffsetsMinutes.filter { plan.moveAt - it * 60_000 > now.toInstant().toEpochMilli() }
+                        val advanceOffsets = upcomingOffsets.filter { it > 0 }
                         PlannedMoveUi(
                             plan = plan,
                             streetName = target?.street?.name ?: plan.streetName,
@@ -143,8 +145,10 @@ class StreetListViewModel(
                                 problem != null -> "Plan reminders cancelled"
                                 !settings.moveRemindersEnabled || settings.moveOffsetsMinutes.isEmpty() -> "Planned move reminders off"
                                 upcomingOffsets.isEmpty() -> "No upcoming plan reminders"
-                                else -> "Reminders: ${upcomingOffsets.sortedDescending().joinToString { reminderOffsetLabel(it) }}"
+                                advanceOffsets.isEmpty() -> null
+                                else -> "Reminders: ${advanceOffsets.sortedDescending().joinToString { reminderOffsetLabel(it) }}"
                             },
+                            isFavourite = target?.street?.isFavourite == true,
                         )
                     }
                 },

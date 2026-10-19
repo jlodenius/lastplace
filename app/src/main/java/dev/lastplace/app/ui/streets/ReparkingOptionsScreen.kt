@@ -1,6 +1,7 @@
 package dev.lastplace.app.ui.streets
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,18 +10,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +43,7 @@ fun ReparkingOptionsScreen(onBack: () -> Unit) {
     val container = (LocalContext.current.applicationContext as ParkingApp).container
     val viewModel: StreetListViewModel = viewModel(factory = StreetListViewModel.factory(container))
     val state by viewModel.uiState.collectAsState()
+    val cards = buildReparkingOptionCards(state.reparkingOptions, state.plannedMove)
     val message by viewModel.message.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(message) {
@@ -77,7 +80,9 @@ fun ReparkingOptionsScreen(onBack: () -> Unit) {
                         Text("Move before ${active.deadlineText}")
                         Text(active.remainingText)
                         Text(
-                            if (state.reparkingOptions.firstOrNull()?.justCleaned == true) {
+                            if (state.plannedMove != null) {
+                                "Your selected plan and up to two alternatives. Choosing another option replaces your plan."
+                            } else if (state.reparkingOptions.firstOrNull()?.justCleaned == true) {
                                 "Up to three just-cleaned destinations at your preferred times, latest opportunity first. These are plans, not parking availability now."
                             } else {
                                 "No preferred just-cleaned opportunity remains. These alternatives are available now, longest stay first."
@@ -86,40 +91,49 @@ fun ReparkingOptionsScreen(onBack: () -> Unit) {
                             style = MaterialTheme.typography.bodySmall,
                         )
                         if (state.reparkingOptions.isEmpty()) {
-                            Text("No other saved street is available. Check another location before your deadline.")
+                            Text(
+                                if (state.plannedMove != null) "No alternative streets are available right now."
+                                else "No other saved street is available. Check another location before your deadline.",
+                            )
                         }
                     }
                 }
             }
-            state.plannedMove?.let { plan ->
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            PlannedMoveDetails(plan, { viewModel.cancelPlan() }, { viewModel.arriveAtPlan() })
+            items(cards, key = { it.streetId }) { card ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = if (card.plannedMove != null) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        card.plannedMove?.let { plan ->
+                            PlannedMoveDetails(
+                                plan,
+                                onCancel = { viewModel.cancelPlan() },
+                                onArrived = { viewModel.arriveAtPlan() },
+                                option = card.option.takeIf { card.isSelectedOption },
+                            )
+                        }
+                        card.option?.takeUnless { card.isSelectedOption }?.let { option ->
+                            if (card.plannedMove != null) {
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                            Text(
+                                when {
+                                    card.plannedMove != null -> "New opportunity on this street"
+                                    card.recommended -> "Recommended"
+                                    else -> "Alternative"
+                                },
+                                fontWeight = FontWeight.Bold,
+                            )
+                            ReparkingOptionDetails(option)
+                            OutlinedButton(onClick = { viewModel.selectPlan(option) }, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (option.justCleaned) "Plan this move" else "Plan move now")
+                            }
                         }
                     }
                 }
             }
-            itemsIndexed(state.reparkingOptions, key = { _, option -> option.street.id }) { index, option ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            if (index == 0) "1 · Recommended" else "${index + 1} · Alternative",
-                            fontWeight = FontWeight.Bold,
-                        )
-                        ReparkingOptionDetails(option)
-                        val selected = state.plannedMove?.let {
-                            it.problem == null && it.plan.streetId == option.street.id &&
-                                it.plan.justCleaned == option.justCleaned &&
-                                (if (option.justCleaned) it.plan.moveAt == option.moveAt.toInstant().toEpochMilli() else !it.timePassed)
-                        } == true
-                        TextButton(enabled = !selected, onClick = { viewModel.selectPlan(option) }) {
-                            Text(if (selected) "Selected plan" else if (option.justCleaned) "Plan this move" else "Plan move now")
-                        }
-                    }
-                }
-            }
-            if (state.reparkingOptions.isNotEmpty()) {
+            if (cards.isNotEmpty()) {
                 item {
                     Text(
                         "Selecting a plan does not register parking. Confirm after you have moved. Availability is based on saved schedules, not live parking spaces.",
@@ -149,6 +163,11 @@ internal fun ReparkingOptionDetails(option: ReparkingOption) {
         if (option.justCleaned) "${option.moveAt.format(parkingTimeFormatter)} · Just cleaned then"
         else "Available now · Move now for the longest stay",
     )
+    ReparkingStayDetails(option)
+}
+
+@Composable
+internal fun ReparkingStayDetails(option: ReparkingOption) {
     Text(
         option.nextCleaningStart?.let {
             "Park for ${freeForText(option.moveAt, it)} · Until ${it.format(parkingTimeFormatter)}"

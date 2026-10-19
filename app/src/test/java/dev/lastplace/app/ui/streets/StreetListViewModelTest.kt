@@ -199,6 +199,39 @@ class StreetListViewModelTest {
     }
 
     @Test
+    fun plannedMoveSummaryOmitsAtTimeWithoutDisablingThatReminder() = runTest {
+        val session = ParkingSession(3, 2, at(8).toEpochMilli(), at(0).plusSeconds(86400).toEpochMilli(), source = "MANUAL")
+        val plan = PlannedMove(3, "selected", 1, dayStreet.street.name, at(14).toEpochMilli(), true, dayStreet.rulesSignature())
+        val preferences = MutableStateFlow(ReminderSettings(moveOffsetsMinutes = setOf(60, 10, 0)))
+        `when`(parking.observeActiveSession()).thenReturn(flowOf(session))
+        `when`(reminders.plans).thenReturn(flowOf(listOf(plan)))
+        `when`(settings.settings).thenReturn(preferences)
+        val model = viewModel()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
+        runCurrent()
+        assertEquals("Reminders: 1 hour before, 10 minutes before", model.uiState.value.plannedMove?.remindersText)
+        assertEquals(setOf(60L, 10L, 0L), preferences.value.moveOffsetsMinutes)
+
+        `when`(clock.instant()).thenReturn(at(13, 55))
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(null, model.uiState.value.plannedMove?.remindersText)
+        preferences.value = preferences.value.copy(moveOffsetsMinutes = setOf(0))
+        runCurrent()
+        assertEquals(null, model.uiState.value.plannedMove?.remindersText)
+        assertTrue(preferences.value.moveRemindersEnabled)
+
+        preferences.value = preferences.value.copy(moveRemindersEnabled = false)
+        runCurrent()
+        assertEquals("Planned move reminders off", model.uiState.value.plannedMove?.remindersText)
+        preferences.value = preferences.value.copy(moveRemindersEnabled = true)
+        `when`(clock.instant()).thenReturn(at(14, 2))
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals("No upcoming plan reminders", model.uiState.value.plannedMove?.remindersText)
+    }
+
+    @Test
     fun rejectedGpsParkingShowsUnavailabilityInsteadOfSuccess() = runTest {
         `when`(location.hasPermission()).thenReturn(true)
         `when`(location.current()).thenReturn(LatLng(59.3, 18.0))
