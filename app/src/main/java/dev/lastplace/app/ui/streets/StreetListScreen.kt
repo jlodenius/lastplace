@@ -39,6 +39,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -319,21 +320,27 @@ private fun ActiveParkingCard(
                     fontWeight = FontWeight.Bold,
                 )
                 ReparkingOptionDetails(recommendation)
-                TextButton(onClick = onPlan) { Text(if (recommendation.justCleaned) "Plan this move" else "Plan move now") }
-                TextButton(onClick = onOpenOptions) { Text("View re-parking options") }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = onPlan, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (recommendation.justCleaned) "Plan this move" else "Plan move now")
+                    }
+                    OutlinedButton(onClick = onOpenOptions, modifier = Modifier.fillMaxWidth()) {
+                        Text("View re-parking options")
+                    }
+                }
             } else if (active.hasDeadline) {
                 Text("No other saved street is available. Move before your deadline.", modifier = Modifier.padding(top = 8.dp))
             }
-            if (plannedMove != null) {
+            if (plannedMove != null || recommendation != null) {
                 TextButton(onClick = onMoved, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Text("End current parking")
+                    Text(if (plannedMove != null) "End current parking" else "I moved it")
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    Button(onClick = onMoved) { Text("I moved it") }
+                Button(onClick = onMoved, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text("I moved it")
                 }
             }
         }
