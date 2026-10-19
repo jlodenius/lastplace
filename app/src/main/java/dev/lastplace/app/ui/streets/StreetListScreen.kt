@@ -114,7 +114,7 @@ fun StreetListScreen(
                     ActiveParkingCard(
                         active = active,
                         recommendation = state.reparkingOptions.firstOrNull(),
-                        onMoved = { viewModel.endParking(active.sessionId) },
+                        onEndParking = { viewModel.endParking(active.sessionId) },
                         onOpenOptions = onOpenReparkingOptions,
                         plannedMove = state.plannedMove,
                         deadlineWarningsEnabled = state.deadlineWarningsEnabled,
@@ -291,7 +291,7 @@ private fun LaunchedEffectMessage(message: String?, onShow: (String) -> Unit) {
 private fun ActiveParkingCard(
     active: ActiveParking,
     recommendation: ReparkingOption?,
-    onMoved: () -> Unit,
+    onEndParking: () -> Unit,
     onOpenOptions: () -> Unit,
     plannedMove: PlannedMoveUi?,
     deadlineWarningsEnabled: Boolean,
@@ -304,7 +304,22 @@ private fun ActiveParkingCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Parked on ${active.streetName}", fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Parked on ${active.streetName}",
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.Bold,
+                )
+                OutlinedButton(
+                    onClick = onEndParking,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                ) { Text("End parking") }
+            }
+            Spacer(Modifier.height(8.dp))
             Text(if (active.hasDeadline) "Move before ${active.deadlineText}" else active.deadlineText)
             Text(active.remainingText, style = MaterialTheme.typography.bodyMedium)
             if (!deadlineWarningsEnabled) {
@@ -333,15 +348,6 @@ private fun ActiveParkingCard(
                 }
             } else if (active.hasDeadline) {
                 Text("No other saved street is available. Move before your deadline.", modifier = Modifier.padding(top = 8.dp))
-            }
-            if (plannedMove != null || recommendation != null) {
-                TextButton(onClick = onMoved, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Text(if (plannedMove != null) "End current parking" else "I moved it")
-                }
-            } else {
-                Button(onClick = onMoved, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Text("I moved it")
-                }
             }
         }
     }
