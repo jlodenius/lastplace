@@ -19,7 +19,6 @@ data class ReminderSettings(
     val moveOffsetsMinutes: Set<Long> = setOf(0L),
     val deadlineWarningsEnabled: Boolean = true,
     val moveRemindersEnabled: Boolean = true,
-    val autoDetectEnabled: Boolean = true,
     val preferredReparkingTimes: Set<LocalTime> = emptySet(),
 ) {
     fun offsets(kind: ReminderKind): Set<Long> = when (kind) {
@@ -43,7 +42,6 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
     private val moveOffsetsKey = stringSetPreferencesKey("move_offsets_minutes")
     private val deadlineEnabledKey = booleanPreferencesKey("deadline_warnings_enabled")
     private val moveEnabledKey = booleanPreferencesKey("move_reminders_enabled")
-    private val autoDetectKey = booleanPreferencesKey("auto_detect_enabled")
     private val reparkingTimesKey = stringSetPreferencesKey("preferred_reparking_times")
 
     private fun offsetsKey(kind: ReminderKind) = when (kind) {
@@ -59,7 +57,6 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
         moveOffsetsMinutes = prefs[moveOffsetsKey]?.parseMinutes() ?: setOf(0L),
         deadlineWarningsEnabled = prefs[deadlineEnabledKey] ?: true,
         moveRemindersEnabled = prefs[moveEnabledKey] ?: true,
-        autoDetectEnabled = prefs[autoDetectKey] ?: true,
         preferredReparkingTimes = prefs[reparkingTimesKey].orEmpty().map { LocalTime.parse(it) }.toSet(),
     )
 
@@ -88,10 +85,6 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
         store.edit {
             it[offsetsKey(kind)] = (readSettings(it).offsets(kind) + minutes).map(Long::toString).toSet()
         }
-    }
-
-    suspend fun setAutoDetect(enabled: Boolean) {
-        store.edit { it[autoDetectKey] = enabled }
     }
 
     suspend fun toggleReparkingTime(time: LocalTime) {

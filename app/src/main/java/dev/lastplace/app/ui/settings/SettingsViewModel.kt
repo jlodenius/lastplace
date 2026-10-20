@@ -24,20 +24,20 @@ class SettingsViewModel(
     private val streetRepository: StreetRepository,
 ) : ViewModel() {
 
-    val settings: StateFlow<ReminderSettings> =
-        repository.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReminderSettings())
+    val settings: StateFlow<ReminderSettings?> =
+        repository.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val reparkingTimes: StateFlow<List<ReparkingTimeChoice>> = combine(
+    val reparkingTimes: StateFlow<List<ReparkingTimeChoice>?> = combine(
         streetRepository.observeStreetsWithRules(),
         repository.settings,
     ) { streets, settings ->
         streets.flatMap { street -> street.rules.map { it.toWindow().end } }
             .distinct().sorted().map { ReparkingTimeChoice(it, it in settings.preferredReparkingTimes) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun toggleReparkingTime(time: LocalTime) {
         viewModelScope.launch {
-            if (reparkingTimes.value.any { it.time == time }) repository.toggleReparkingTime(time)
+            if (reparkingTimes.value?.any { it.time == time } == true) repository.toggleReparkingTime(time)
         }
     }
 
@@ -51,10 +51,6 @@ class SettingsViewModel(
 
     fun setReminderEnabled(kind: ReminderKind, enabled: Boolean) {
         viewModelScope.launch { repository.setReminderEnabled(kind, enabled) }
-    }
-
-    fun setAutoDetect(enabled: Boolean) {
-        viewModelScope.launch { repository.setAutoDetect(enabled) }
     }
 
     companion object {

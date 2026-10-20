@@ -10,12 +10,15 @@ import dev.lastplace.app.data.db.Street
 import dev.lastplace.app.data.db.StreetWithRules
 import dev.lastplace.app.data.settings.ReminderSettings
 import dev.lastplace.app.data.settings.SettingsRepository
+import dev.lastplace.app.domain.ReminderKind
+import dev.lastplace.app.domain.ReminderSpec
 import dev.lastplace.app.domain.ScheduleEngine
 import dev.lastplace.app.domain.StreetMatcher
 import dev.lastplace.app.domain.model.LatLng
 import dev.lastplace.app.location.LocationProvider
 import dev.lastplace.app.parking.ParkingService
 import dev.lastplace.app.reminders.ReminderCoordinator
+import dev.lastplace.app.reminders.ReminderReadiness
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +39,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
+import kotlin.coroutines.resume
 import org.mockito.Mockito.`when`
 import java.time.Clock
 import java.time.LocalTime
@@ -74,6 +81,7 @@ class StreetListViewModelTest {
         `when`(parking.observeActiveSession()).thenReturn(flowOf(null))
         `when`(settings.settings).thenReturn(flowOf(ReminderSettings()))
         `when`(reminders.plans).thenReturn(flowOf(emptyList()))
+        `when`(reminders.readiness).thenReturn(flowOf(ReminderReadiness()))
     }
 
     @After
@@ -176,7 +184,12 @@ class StreetListViewModelTest {
         `when`(parking.observeActiveSession()).thenReturn(active)
         `when`(streets.observeStreetsWithRules()).thenReturn(saved)
         `when`(reminders.plans).thenReturn(flowOf(listOf(plan)))
-        `when`(settings.settings).thenReturn(flowOf(ReminderSettings(moveRemindersEnabled = false, deadlineWarningsEnabled = false)))
+        val preferences = ReminderSettings(moveRemindersEnabled = false, deadlineWarningsEnabled = false)
+        `when`(settings.settings).thenReturn(flowOf(preferences))
+        `when`(reminders.readiness).thenReturn(flowOf(ReminderReadiness(
+            sessionId = session.id, planId = plan.id, updating = false,
+            settings = preferences, deadline = session.deadline,
+        )))
         val model = viewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
         runCurrent()
@@ -199,36 +212,105 @@ class StreetListViewModelTest {
     }
 
     @Test
-    fun plannedMoveSummaryOmitsAtTimeWithoutDisablingThatReminder() = runTest {
+    fun plannedMoveShowsActualAtTimeReminderAndNeverGuessesFromOffsets() = runTest {
         val session = ParkingSession(3, 2, at(8).toEpochMilli(), at(0).plusSeconds(86400).toEpochMilli(), source = "MANUAL")
         val plan = PlannedMove(3, "selected", 1, dayStreet.street.name, at(14).toEpochMilli(), true, dayStreet.rulesSignature())
         val preferences = MutableStateFlow(ReminderSettings(moveOffsetsMinutes = setOf(60, 10, 0)))
         `when`(parking.observeActiveSession()).thenReturn(flowOf(session))
         `when`(reminders.plans).thenReturn(flowOf(listOf(plan)))
         `when`(settings.settings).thenReturn(preferences)
+        val reconciled = MutableStateFlow(ReminderReadiness(
+            sessionId = session.id, planId = plan.id, updating = false,
+            settings = preferences.value, deadline = session.deadline,
+            pending = listOf(ReminderSpec(3, ReminderKind.PLANNED_MOVE, plan.moveAt, plan.moveAt, 0, plan.streetName, plan.id)),
+        ))
+        `when`(reminders.readiness).thenReturn(reconciled)
         val model = viewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
         runCurrent()
-        assertEquals("Reminders: 1 hour before, 10 minutes before", model.uiState.value.plannedMove?.remindersText)
+        assertTrue(model.uiState.value.plannedMove!!.remindersText!!.startsWith("Planned move reminder scheduled:"))
         assertEquals(setOf(60L, 10L, 0L), preferences.value.moveOffsetsMinutes)
 
-        `when`(clock.instant()).thenReturn(at(13, 55))
-        advanceTimeBy(60_000)
-        runCurrent()
-        assertEquals(null, model.uiState.value.plannedMove?.remindersText)
-        preferences.value = preferences.value.copy(moveOffsetsMinutes = setOf(0))
-        runCurrent()
-        assertEquals(null, model.uiState.value.plannedMove?.remindersText)
-        assertTrue(preferences.value.moveRemindersEnabled)
-
-        preferences.value = preferences.value.copy(moveRemindersEnabled = false)
-        runCurrent()
-        assertEquals("Planned move reminders off", model.uiState.value.plannedMove?.remindersText)
-        preferences.value = preferences.value.copy(moveRemindersEnabled = true)
         `when`(clock.instant()).thenReturn(at(14, 2))
         advanceTimeBy(60_000)
         runCurrent()
+        assertTrue(model.uiState.value.plannedMove!!.remindersText!!.contains("due or delayed"))
+        reconciled.value = reconciled.value.copy(pending = emptyList())
+        runCurrent()
         assertEquals("No upcoming plan reminders", model.uiState.value.plannedMove?.remindersText)
+
+        preferences.value = preferences.value.copy(moveRemindersEnabled = false)
+        runCurrent()
+        assertEquals("Updating reminder status…", model.uiState.value.plannedMove?.remindersText)
+        reconciled.value = reconciled.value.copy(settings = preferences.value)
+        runCurrent()
+        assertEquals("Planned move reminders off", model.uiState.value.plannedMove?.remindersText)
+    }
+
+    @Test
+    fun startsLoadingAndRefreshesUrgencyImmediatelyOnResume() = runTest {
+        val session = ParkingSession(3, 1, at(6).toEpochMilli(), at(9).toEpochMilli(), source = "MANUAL")
+        `when`(parking.observeActiveSession()).thenReturn(flowOf(session))
+        `when`(clock.instant()).thenReturn(at(6, 59))
+        val model = viewModel()
+        assertTrue(model.uiState.value.isLoading)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
+        runCurrent()
+        assertFalse(model.uiState.value.isLoading)
+        assertEquals(ParkingUrgency.Normal, model.uiState.value.active?.urgency)
+        `when`(clock.instant()).thenReturn(at(7))
+        model.refresh()
+        runCurrent()
+        assertEquals(ParkingUrgency.Soon, model.uiState.value.active?.urgency)
+        `when`(clock.instant()).thenReturn(at(8, 59, 45))
+        model.refresh()
+        runCurrent()
+        assertEquals("Less than a minute remaining", model.uiState.value.active?.remainingText)
+        `when`(clock.instant()).thenReturn(at(9))
+        model.refresh()
+        runCurrent()
+        assertEquals(ParkingUrgency.Overdue, model.uiState.value.active?.urgency)
+    }
+
+    @Test
+    fun liveCountdownEntersSubMinuteStateWithoutAnUnrelatedEvent() = runTest {
+        val session = ParkingSession(3, 1, at(8).toEpochMilli(), at(9).toEpochMilli(), source = "MANUAL")
+        `when`(parking.observeActiveSession()).thenReturn(flowOf(session))
+        `when`(clock.instant()).thenReturn(at(8, 59))
+        val model = viewModel()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
+        runCurrent()
+        assertEquals("1 minute remaining", model.uiState.value.active?.remainingText)
+        `when`(clock.instant()).thenReturn(at(8, 59, 1))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("Less than a minute remaining", model.uiState.value.active?.remainingText)
+        `when`(clock.instant()).thenReturn(at(9))
+        advanceTimeBy(59_000)
+        runCurrent()
+        assertEquals(ParkingUrgency.Overdue, model.uiState.value.active?.urgency)
+    }
+
+    @Test
+    fun repeatedRegistrationTapsAreIgnoredWhileMutationIsRunning() = runTest {
+        var pending: Continuation<Long>? = null
+        `when`(service.parkIfCurrent(1, null, at(8, 59, 59))).thenAnswer { invocation ->
+            @Suppress("UNCHECKED_CAST")
+            val continuation = invocation.rawArguments.last() as Continuation<Long>
+            pending = continuation
+            COROUTINE_SUSPENDED
+        }
+        `when`(streets.getStreetWithRules(1)).thenReturn(dayStreet)
+        val model = viewModel()
+        val first = model.park(1)
+        model.park(1).join()
+        assertTrue(model.mutationRunning.value)
+        assertEquals(1, mockingDetails(service).invocations.count { it.method.name == "parkIfCurrent" })
+        requireNotNull(pending).resume(42)
+        first.join()
+        assertFalse(model.mutationRunning.value)
+        assertTrue(model.notificationPrompt.value)
+        assertEquals("Parked on Day street", model.message.value)
     }
 
     @Test
@@ -236,10 +318,11 @@ class StreetListViewModelTest {
         `when`(location.hasPermission()).thenReturn(true)
         `when`(location.current()).thenReturn(LatLng(59.3, 18.0))
         `when`(clock.instant()).thenReturn(at(10))
-        `when`(service.park(1, parkedAt = at(10))).thenReturn(-1L)
+        `when`(service.parkIfCurrent(1, null, at(10))).thenReturn(-1L)
         val model = viewModel()
         model.parkWhereIAm().join()
-        assertEquals("Day street isn't available to park on right now", model.message.value)
+        assertTrue(model.actionError.value!!.contains("unavailable"))
+        assertEquals(null, model.message.value)
         assertFalse(model.parkLoading.value)
     }
 }

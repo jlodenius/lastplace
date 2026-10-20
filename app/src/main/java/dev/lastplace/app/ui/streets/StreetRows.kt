@@ -52,7 +52,7 @@ internal fun buildStreetRows(
         name = street.street.name,
         freeFor = availability.nextCleaningStart?.takeIf { availability.isAvailable }?.let { freeForText(now, it) },
         nextCleaningText = availability.nextCleaningStart?.takeIf { availability.isAvailable }
-            ?.let { "cleaning ${it.format(parkingTimeFormatter)}" },
+            ?.let { "Next cleaning: ${it.format(parkingTimeFormatter)}" },
         unavailableUntilText = availability.availableAt?.format(parkingTimeFormatter),
         daytimeCleaningText = daytimeText,
         isFavourite = street.street.isFavourite,
@@ -65,15 +65,40 @@ private data class ScheduledStreet(
     val availability: ParkingAvailability,
 )
 
-internal fun freeForText(now: ZonedDateTime, until: ZonedDateTime): String {
-    val d = Duration.between(now, until)
-    if (d.isNegative || d.isZero) return "0m"
-    val days = d.toDays()
-    val hours = d.toHours() % 24
-    val minutes = d.toMinutes() % 60
+enum class ParkingUrgency { Normal, Soon, Overdue, NoDeadline }
+
+private val moveSoonThreshold = Duration.ofHours(2)
+
+internal fun parkingUrgency(now: ZonedDateTime, deadline: ZonedDateTime?): ParkingUrgency {
+    if (deadline == null) return ParkingUrgency.NoDeadline
+    val remaining = Duration.between(now, deadline)
     return when {
-        days > 0 -> "${days}d ${hours}h"
-        hours > 0 -> "${hours}h ${minutes}m"
-        else -> "${minutes}m"
+        remaining.isNegative || remaining.isZero -> ParkingUrgency.Overdue
+        remaining <= moveSoonThreshold -> ParkingUrgency.Soon
+        else -> ParkingUrgency.Normal
+    }
+}
+
+internal fun parkingCountdownText(now: ZonedDateTime, deadline: ZonedDateTime): String {
+    val remaining = Duration.between(now, deadline)
+    return when {
+        remaining.isNegative || remaining.isZero -> "Cleaning deadline passed"
+        remaining < Duration.ofMinutes(1) -> "Less than a minute remaining"
+        else -> "${freeForText(now, deadline)} remaining"
+    }
+}
+
+internal fun freeForText(now: ZonedDateTime, until: ZonedDateTime): String {
+    val duration = Duration.between(now, until)
+    if (duration.isNegative || duration.isZero) return "0 minutes"
+    if (duration < Duration.ofMinutes(1)) return "less than a minute"
+    val days = duration.toDays()
+    val hours = duration.toHours() % 24
+    val minutes = duration.toMinutes() % 60
+    fun amount(value: Long, unit: String) = "$value $unit${if (value == 1L) "" else "s"}"
+    return when {
+        days > 0 -> listOfNotNull(amount(days, "day"), hours.takeIf { it > 0 }?.let { amount(it, "hour") }).joinToString(" ")
+        hours > 0 -> listOfNotNull(amount(hours, "hour"), minutes.takeIf { it > 0 }?.let { amount(it, "minute") }).joinToString(" ")
+        else -> amount(minutes, "minute")
     }
 }

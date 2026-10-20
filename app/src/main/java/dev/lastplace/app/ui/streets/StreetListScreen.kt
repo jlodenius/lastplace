@@ -1,38 +1,40 @@
 package dev.lastplace.app.ui.streets
 
 import android.Manifest
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -41,33 +43,57 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.lastplace.app.ParkingApp
+import dev.lastplace.app.domain.ReminderKind
 import dev.lastplace.app.domain.ReparkingOption
+import dev.lastplace.app.reminders.Notifications
+import dev.lastplace.app.reminders.ReminderCapabilities
+import dev.lastplace.app.ui.settings.ContextualNotificationPermission
+import dev.lastplace.app.ui.settings.SettingsSection
+import dev.lastplace.app.ui.settings.openNotificationSettings
+import dev.lastplace.app.ui.settings.openPreciseReminderSettings
+import dev.lastplace.app.ui.settings.rememberReminderCapabilities
+import dev.lastplace.app.ui.theme.LocalParkingStatusColors
+import dev.lastplace.app.ui.theme.ParkingLayout
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StreetListScreen(
     onAddStreet: () -> Unit,
     onEditStreet: (Long) -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenSettings: (SettingsSection) -> Unit,
     onOpenReparkingOptions: () -> Unit,
+    onOpenReminderSettings: () -> Unit = { onOpenSettings(SettingsSection.DEADLINE_WARNINGS) },
+    onOpenPreferredTimes: () -> Unit = { onOpenSettings(SettingsSection.REPARKING_TIMES) },
+    editorResult: String? = null,
+    onEditorResultHandled: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val container = (context.applicationContext as ParkingApp).container
@@ -75,23 +101,112 @@ fun StreetListScreen(
     val state by viewModel.uiState.collectAsState()
     val message by viewModel.message.collectAsState()
     val parkLoading by viewModel.parkLoading.collectAsState()
+    val mutationRunning by viewModel.mutationRunning.collectAsState()
+    val actionError by viewModel.actionError.collectAsState()
+    val notificationPrompt by viewModel.notificationPrompt.collectAsState()
+    val capabilities = rememberReminderCapabilities(container.reminderScheduler)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val snackbarHost = remember { SnackbarHostState() }
+    DisposableEffect(lifecycle, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    ContextualNotificationPermission(notificationPrompt.takeIf { it }, viewModel::clearNotificationPrompt)
 
-    LaunchedEffectMessage(message) {
-        Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-        viewModel.clearMessage()
+    LaunchedEffect(message) {
+        message?.let {
+            snackbarHost.showSnackbar(it)
+            viewModel.clearMessage()
+        }
     }
 
-    val locationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) viewModel.parkWhereIAm()
-        else Toast.makeText(context, "Location permission denied", Toast.LENGTH_SHORT).show()
+    LaunchedEffect(editorResult) {
+        editorResult?.let {
+            snackbarHost.showSnackbar(it)
+            onEditorResultHandled()
+        }
+    }
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true) viewModel.parkWhereIAm()
+        else viewModel.locationPermissionDenied()
     }
 
+    StreetListContent(
+        state = state,
+        parkLoading = parkLoading,
+        gpsError = actionError,
+        mutationInProgress = mutationRunning,
+        snackbarHost = snackbarHost,
+        onAddStreet = onAddStreet,
+        onEditStreet = onEditStreet,
+        onOpenSettings = { onOpenSettings(SettingsSection.DELIVERY) },
+        onOpenReminderSettings = onOpenReminderSettings,
+        onOpenPreferredTimes = onOpenPreferredTimes,
+        onOpenReparkingOptions = onOpenReparkingOptions,
+        onParkWhereIAm = {
+            if (container.locationProvider.hasPermission()) viewModel.parkWhereIAm()
+            else locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        },
+        onPark = { streetId, sessionId ->
+            if (sessionId == null) viewModel.park(streetId) else viewModel.confirmPark(streetId, sessionId)
+        },
+        onEndParking = { viewModel.endParking(it) },
+        onSelectPlan = { viewModel.selectPlan(it) },
+        onCancelPlan = { viewModel.cancelPlan(it.plan.sessionId, it.plan.id) },
+        onArrived = { viewModel.arriveAtPlan(it.plan.sessionId, it.plan.id) },
+        onToggleFavourite = { viewModel.toggleFavourite(it) },
+        onShowDaytimeOnly = viewModel::showDaytimeOnly,
+        deadlineReminderContent = {
+            if (state.active?.hasDeadline == true || state.deadlineReminderText != "No cleaning deadline in saved hours") {
+                Text(state.deadlineReminderText)
+            }
+            ReminderDeliveryBlockers(capabilities, ReminderKind.PARKING_DEADLINE)
+        },
+        planReminderDetails = {
+            ReminderDeliveryBlockers(capabilities, ReminderKind.PLANNED_MOVE)
+            TextButton(onClick = { onOpenSettings(SettingsSection.PLANNED_MOVES) }) { Text("Move reminder settings") }
+        },
+    )
+}
+
+private sealed interface ParkingConfirmation {
+    data class Change(val sessionId: Long, val fromName: String, val streetId: Long, val streetName: String) : ParkingConfirmation
+    data class End(val sessionId: Long, val streetName: String) : ParkingConfirmation
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+internal fun StreetListContent(
+    state: HomeUiState,
+    parkLoading: Boolean = false,
+    gpsError: String? = null,
+    mutationInProgress: Boolean = false,
+    snackbarHost: SnackbarHostState = remember { SnackbarHostState() },
+    onAddStreet: () -> Unit = {},
+    onEditStreet: (Long) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenReminderSettings: () -> Unit = onOpenSettings,
+    onOpenPreferredTimes: () -> Unit = onOpenSettings,
+    onOpenReparkingOptions: () -> Unit = {},
+    onParkWhereIAm: () -> Unit = {},
+    onPark: (Long, Long?) -> Unit = { _, _ -> },
+    onEndParking: (Long) -> Unit = {},
+    onSelectPlan: (ReparkingOption) -> Unit = {},
+    onCancelPlan: (PlannedMoveUi) -> Unit = {},
+    onArrived: (PlannedMoveUi) -> Unit = {},
+    onToggleFavourite: (Long) -> Unit = {},
+    onShowDaytimeOnly: (Boolean) -> Unit = {},
+    deadlineReminderContent: @Composable () -> Unit = { Text("Updating reminder status…") },
+    planReminderDetails: (@Composable () -> Unit)? = null,
+) {
+    var confirmation by remember { mutableStateOf<ParkingConfirmation?>(null) }
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("My streets") },
+                title = { Text("Parking") },
                 actions = {
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
@@ -99,255 +214,325 @@ fun StreetListScreen(
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHost) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddStreet) {
-                Icon(Icons.Filled.Add, contentDescription = "Add street")
+            if (!state.isLoading && state.hasSavedStreets) {
+                FloatingActionButton(onClick = onAddStreet) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add street")
+                }
             }
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 88.dp),
-        ) {
-            item {
-                state.active?.let { active ->
-                    ActiveParkingCard(
-                        active = active,
-                        recommendation = state.reparkingOptions.firstOrNull(),
-                        onEndParking = { viewModel.endParking(active.sessionId) },
-                        onOpenOptions = onOpenReparkingOptions,
-                        plannedMove = state.plannedMove,
-                        deadlineWarningsEnabled = state.deadlineWarningsEnabled,
-                        onPlan = { state.reparkingOptions.firstOrNull()?.let(viewModel::selectPlan) },
-                        onCancelPlan = { viewModel.cancelPlan() },
-                        onArrived = { viewModel.arriveAtPlan() },
-                    )
-                }
-
-                if (state.active == null) {
-                    ExtendedFloatingActionButton(
-                        text = { Text(if (parkLoading) "Detecting…" else "Park where I am") },
-                        icon = {
-                            if (parkLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
+        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            LazyColumn(
+                modifier = Modifier.widthIn(max = ParkingLayout.contentWidth).fillMaxWidth().testTag("parking-content"),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                when {
+                    state.isLoading -> item {
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            CircularProgressIndicator()
+                            Text("Loading parking…")
+                        }
+                    }
+                    !state.hasSavedStreets -> item {
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text("No saved streets", style = MaterialTheme.typography.headlineSmall)
+                            Text("Save the streets you use and enter their cleaning hours. Register parking to track when to move.")
+                            Text("Enter cleaning hours from street signs, not the map.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Button(onClick = onAddStreet) { Text("Add your first street") }
+                        }
+                    }
+                    else -> {
+                        item {
+                            val active = state.active
+                            if (active != null) {
+                                ActiveParkingCard(
+                                    active = active,
+                                    isBusy = mutationInProgress,
+                                    onEndParking = { confirmation = ParkingConfirmation.End(active.sessionId, active.streetName) },
+                                    onOpenReminderSettings = onOpenReminderSettings,
+                                    reminderContent = deadlineReminderContent,
                                 )
                             } else {
-                                Icon(Icons.Filled.LocationOn, contentDescription = null)
-                            }
-                        },
-                        onClick = {
-                            if (!parkLoading) {
-                                if (container.locationProvider.hasPermission()) viewModel.parkWhereIAm()
-                                else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    )
-                }
-
-                if (state.hasSavedStreets) {
-                    Row(
-                        modifier = Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        FilterChip(
-                            selected = !state.daytimeOnly,
-                            onClick = { viewModel.showDaytimeOnly(false) },
-                            label = { Text("All streets") },
-                        )
-                        FilterChip(
-                            selected = state.daytimeOnly,
-                            onClick = { viewModel.showDaytimeOnly(!state.daytimeOnly) },
-                            label = { Text("Daytime cleaning") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.WbSunny,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            },
-                        )
-                    }
-                    Text(
-                        "Daytime cleaning: within 08:00–18:00",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            if (state.streets.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (state.hasSavedStreets) "No streets with daytime cleaning."
-                            else "No streets yet. Tap + to add one.",
-                        )
-                    }
-                }
-            } else {
-                items(state.streets, key = { it.id }) { row ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onEditStreet(row.id) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(row.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                                IconButton(onClick = { viewModel.toggleFavourite(row.id) }) {
-                                    Icon(
-                                        if (row.isFavourite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                                        contentDescription = if (row.isFavourite) {
-                                            "Remove ${row.name} from favourites"
-                                        } else "Favourite ${row.name}",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Not currently parked", style = MaterialTheme.typography.titleMedium)
+                                    Button(onClick = onParkWhereIAm, enabled = !parkLoading && !mutationInProgress) {
+                                        if (parkLoading) {
+                                            CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(24.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(Icons.Filled.LocationOn, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                                        }
+                                        Text(if (parkLoading) "Finding your location…" else "Park where I am")
+                                    }
+                                    Text("Or choose a saved street below.")
                                 }
                             }
-                            Spacer(Modifier.height(2.dp))
-                            StreetSubtitle(row)
-                            row.daytimeCleaningText?.let { times ->
-                                Spacer(Modifier.height(6.dp))
-                                DaytimeCleaningBadge(times)
+                            gpsError?.let {
+                                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                             }
                         }
-                        TextButton(
-                            onClick = { viewModel.park(row.id) },
-                            enabled = row.isAvailable,
-                        ) { Text("Park here") }
+                        state.plannedMove?.let { plan ->
+                            item {
+                                PlannedMoveDetails(
+                                    plan = plan,
+                                    onCancel = { onCancelPlan(plan) },
+                                    onArrived = { onArrived(plan) },
+                                    onChangePlan = onOpenReparkingOptions,
+                                    compact = true,
+                                    isBusy = mutationInProgress,
+                                    reminderDetails = planReminderDetails,
+                                    modifier = Modifier.padding(top = ParkingLayout.spacing),
+                                )
+                            }
+                        } ?: state.active?.let { active ->
+                            if (active.hasDeadline) {
+                                item {
+                                    Column(modifier = Modifier.padding(top = ParkingLayout.spacing), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("Suggested move", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                                        if (!state.hasPreferredTimes) {
+                                            Text("No preferred re-parking times selected")
+                                            TextButton(onClick = onOpenPreferredTimes) { Text("Choose times") }
+                                        }
+                                        val option = state.reparkingOptions.firstOrNull()
+                                        if (state.hasPreferredTimes && option?.justCleaned != true) {
+                                            Text("No suitable opportunity at your preferred times before this deadline.")
+                                        }
+                                        if (option != null) {
+                                            Text(option.street.name, style = MaterialTheme.typography.titleMedium)
+                                            Text(if (option.justCleaned) option.moveAt.format(parkingTimeFormatter) else "Move now · Longest stay")
+                                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                OutlinedButton(onClick = { onSelectPlan(option) }, enabled = !mutationInProgress) { Text("Plan this move") }
+                                                TextButton(onClick = onOpenReparkingOptions) { Text("View options") }
+                                            }
+                                        } else {
+                                            Text("No other saved street is available. Check another location before your deadline.")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Column(modifier = Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Saved streets", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                                Text("Longest stay first · Based on saved cleaning hours", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(selected = !state.daytimeOnly, onClick = { onShowDaytimeOnly(false) }, label = { Text("All streets") })
+                                    FilterChip(
+                                        selected = state.daytimeOnly,
+                                        onClick = { onShowDaytimeOnly(!state.daytimeOnly) },
+                                        label = { Text("Daytime cleaning") },
+                                        leadingIcon = { Icon(Icons.Filled.WbSunny, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                    )
+                                }
+                                Text("Daytime cleaning: within 08:00–18:00. Other cleaning windows still apply.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (state.streets.isEmpty()) {
+                            item {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("No saved streets have daytime cleaning.")
+                                    TextButton(onClick = { onShowDaytimeOnly(false) }) { Text("Show all streets") }
+                                }
+                            }
+                        } else {
+                            items(state.streets, key = { it.id }) { row ->
+                                SavedStreetRow(
+                                    row = row,
+                                    isCurrent = state.active?.streetId == row.id,
+                                    isBusy = mutationInProgress,
+                                    onEdit = { onEditStreet(row.id) },
+                                    onToggleFavourite = { onToggleFavourite(row.id) },
+                                    onPark = {
+                                        val active = state.active
+                                        if (active == null) onPark(row.id, null)
+                                        else confirmation = ParkingConfirmation.Change(active.sessionId, active.streetName, row.id, row.name)
+                                    },
+                                )
+                            }
+                        }
                     }
-                    HorizontalDivider()
                 }
             }
         }
     }
-}
-
-@Composable
-private fun StreetSubtitle(row: StreetRow) {
-    if (!row.isAvailable) {
-        Text(
-            "Cleaning now · Available ${row.unavailableUntilText}",
-            color = MaterialTheme.colorScheme.error,
-        )
-        return
-    }
-    val highlight = SpanStyle(
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        fontSize = 16.sp,
-    )
-    val text = buildAnnotatedString {
-        val freeFor = row.freeFor
-        if (freeFor == null) {
-            withStyle(highlight) { append("Park anytime") }
-        } else {
-            append("Free for ")
-            withStyle(highlight) { append(freeFor) }
-            row.nextCleaningText?.let { append("  ·  $it") }
-        }
-    }
-    Text(text)
-}
-
-@Composable
-private fun DaytimeCleaningBadge(times: String) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.WbSunny, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text("Daytime cleaning · $times", style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun LaunchedEffectMessage(message: String?, onShow: (String) -> Unit) {
-    androidx.compose.runtime.LaunchedEffect(message) {
-        message?.let(onShow)
-    }
-}
-
-@Composable
-private fun ActiveParkingCard(
-    active: ActiveParking,
-    recommendation: ReparkingOption?,
-    onEndParking: () -> Unit,
-    onOpenOptions: () -> Unit,
-    plannedMove: PlannedMoveUi?,
-    deadlineWarningsEnabled: Boolean,
-    onPlan: () -> Unit,
-    onCancelPlan: () -> Unit,
-    onArrived: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Parked on ${active.streetName}",
-                    modifier = Modifier.weight(1f),
-                    fontWeight = FontWeight.Bold,
-                )
-                OutlinedButton(
-                    onClick = onEndParking,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                ) { Text("End parking") }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(if (active.hasDeadline) "Move before ${active.deadlineText}" else active.deadlineText)
-            Text(active.remainingText, style = MaterialTheme.typography.bodyMedium)
-            if (!deadlineWarningsEnabled) {
-                Text("Parking deadline warnings off", style = MaterialTheme.typography.bodySmall)
-            }
-            if (plannedMove != null) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                PlannedMoveDetails(plannedMove, onCancelPlan, onArrived, onChangePlan = onOpenOptions)
-            } else if (recommendation != null) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                Text(
-                    if (recommendation.justCleaned) "Suggested easy re-park" else "Best alternative · longest stay",
-                    fontWeight = FontWeight.Bold,
-                )
-                ReparkingOptionDetails(recommendation)
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+    confirmation?.let { pending ->
+        val isChange = pending is ParkingConfirmation.Change
+        AlertDialog(
+            onDismissRequest = { confirmation = null },
+            title = {
+                Text(when (pending) {
+                    is ParkingConfirmation.Change -> "Change parked location from ${pending.fromName} to ${pending.streetName}?"
+                    is ParkingConfirmation.End -> "End parking on ${pending.streetName}?"
+                })
+            },
+            text = {
+                Text(if (isChange) "Your current session ends, its plan clears, and deadline warnings are recalculated."
+                else "This clears the plan and both reminder groups for this parking session.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !mutationInProgress,
+                    onClick = {
+                        confirmation = null
+                        when (pending) {
+                            is ParkingConfirmation.Change -> onPark(pending.streetId, pending.sessionId)
+                            is ParkingConfirmation.End -> onEndParking(pending.sessionId)
+                        }
+                    },
                 ) {
-                    Button(onClick = onPlan, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (recommendation.justCleaned) "Plan this move" else "Plan move now")
-                    }
-                    OutlinedButton(onClick = onOpenOptions, modifier = Modifier.fillMaxWidth()) {
-                        Text("View re-parking options")
-                    }
+                    Text(if (pending is ParkingConfirmation.Change) "I've parked on ${pending.streetName}" else "End parking")
                 }
-            } else if (active.hasDeadline) {
-                Text("No other saved street is available. Move before your deadline.", modifier = Modifier.padding(top = 8.dp))
+            },
+            dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun SavedStreetRow(
+    row: StreetRow,
+    isCurrent: Boolean,
+    isBusy: Boolean,
+    onEdit: () -> Unit,
+    onToggleFavourite: () -> Unit,
+    onPark: () -> Unit,
+) {
+    Surface(
+        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(row.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                IconButton(
+                    onClick = onToggleFavourite,
+                    enabled = !isBusy,
+                    modifier = Modifier.semantics {
+                        contentDescription = if (row.isFavourite) "Remove ${row.name} from favourites" else "Favourite ${row.name}"
+                        stateDescription = if (row.isFavourite) "Favourite" else "Not favourite"
+                    },
+                ) {
+                    Icon(
+                        if (row.isFavourite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (!row.isAvailable) {
+                Text("Cleaning now · Ends ${row.unavailableUntilText}", color = MaterialTheme.colorScheme.error)
+                Text("Registration is unavailable during saved cleaning hours.")
+            } else {
+                Text(row.freeFor?.let { "Can stay $it" } ?: "No cleaning deadline in saved hours")
+                row.nextCleaningText?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            row.daytimeCleaningText?.let {
+                Text("Daytime cleaning · $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onEdit, enabled = !isBusy, modifier = Modifier.semantics { contentDescription = "Edit ${row.name}" }) {
+                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.padding(end = 4.dp).size(18.dp))
+                    Text("Edit")
+                }
+                OutlinedButton(
+                    onClick = onPark,
+                    enabled = row.isAvailable && !isCurrent && !isBusy,
+                    modifier = Modifier.semantics { contentDescription = if (isCurrent) "Parked on ${row.name}" else "I've parked on ${row.name}" },
+                ) { Text(if (isCurrent) "Parked here" else "I've parked here") }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ActiveParkingCard(
+    active: ActiveParking,
+    isBusy: Boolean,
+    onEndParking: () -> Unit,
+    onOpenReminderSettings: () -> Unit,
+    reminderContent: @Composable () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val warning = LocalParkingStatusColors.current
+    val container = when (active.urgency) {
+        ParkingUrgency.Soon -> warning.warningContainer
+        ParkingUrgency.Overdue -> colors.errorContainer
+        else -> colors.surface
+    }
+    val foreground = when (active.urgency) {
+        ParkingUrgency.Soon -> warning.onWarningContainer
+        ParkingUrgency.Overdue -> colors.onErrorContainer
+        else -> colors.onSurface
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = foreground),
+        border = BorderStroke(1.dp, colors.outlineVariant),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CurrentParkingHeader(active.streetName, isBusy, onEndParking)
+            when (active.urgency) {
+                ParkingUrgency.Soon, ParkingUrgency.Overdue -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(if (active.urgency == ParkingUrgency.Soon) Icons.Filled.WarningAmber else Icons.Outlined.ErrorOutline, contentDescription = null)
+                    Text(if (active.urgency == ParkingUrgency.Soon) "Move soon" else "Move now — cleaning deadline passed", style = MaterialTheme.typography.titleMedium)
+                }
+                else -> Unit
+            }
+            if (active.hasDeadline) {
+                Text(
+                    active.remainingText,
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = if (active.urgency == ParkingUrgency.Normal) colors.primary else foreground,
+                )
+                Text("Move before ${active.deadlineText}", style = MaterialTheme.typography.headlineSmall)
+            } else {
+                Text("No cleaning deadline in saved hours", style = MaterialTheme.typography.headlineSmall)
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            reminderContent()
+            TextButton(onClick = onOpenReminderSettings) { Text("Reminder settings") }
+        }
+    }
+}
+
+@Composable
+internal fun ReminderDeliveryBlockers(capabilities: ReminderCapabilities, kind: ReminderKind) {
+    val context = LocalContext.current
+    val deadline = kind == ReminderKind.PARKING_DEADLINE
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!capabilities.appNotificationsAllowed) {
+            Text("Notifications blocked for LastPlace.", color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { openNotificationSettings(context) }) { Text("Allow notifications") }
+        }
+        if (!capabilities.channelAllowed(kind)) {
+            Text(if (deadline) "Deadline notifications blocked." else "Planned move notifications blocked.", color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = {
+                openNotificationSettings(context, if (deadline) Notifications.CHANNEL_REMINDERS else Notifications.CHANNEL_MOVES)
+            }) { Text(if (deadline) "Allow deadline notifications" else "Allow move notifications") }
+        }
+        if (!capabilities.preciseAlarmsAllowed) {
+            Text("Precise reminders unavailable. Android may delay reminders.")
+            TextButton(onClick = { openPreciseReminderSettings(context) }) { Text("Allow precise reminders") }
+        }
+    }
+}
+
+@Composable
+private fun CurrentParkingHeader(streetName: String, isBusy: Boolean, onEndParking: () -> Unit) {
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints {
+        if (maxWidth.value / fontScale < 360f) {
+            Column {
+                Text("Parked on $streetName", style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = onEndParking, enabled = !isBusy) { Text("End parking") }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Parked on $streetName", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onEndParking, enabled = !isBusy) { Text("End parking") }
             }
         }
     }

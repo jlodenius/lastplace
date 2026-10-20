@@ -40,7 +40,9 @@ class LocationProvider(private val context: Context) {
      * a wrong fix would silently match the wrong street.
      */
     suspend fun current(): LatLng? = withContext(Dispatchers.IO) {
-        if (!hasPermission()) return@withContext null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return@withContext null
         val manager = context.getSystemService(LocationManager::class.java) ?: return@withContext null
         val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
             .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }

@@ -11,6 +11,7 @@
 
     <!-- Foreground location for "use my location", map centering, and smart Park. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- OpenStreetMap search, geometry, and map tiles. -->
     <uses-permission android:name="android.permission.INTERNET" />

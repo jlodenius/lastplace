@@ -13,7 +13,12 @@ import dev.lastplace.app.data.settings.ReminderSettings
 import dev.lastplace.app.data.settings.SettingsRepository
 import dev.lastplace.app.domain.ReminderKind
 import dev.lastplace.app.domain.ScheduleEngine
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,6 +29,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito.clearInvocations
+import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.mockingDetails
 import org.mockito.Mockito.times
@@ -70,6 +76,7 @@ class ReminderCoordinatorTest {
     @Before
     fun setUp() = runTest {
         `when`(parking.getActiveSession()).thenAnswer { active.value }
+        `when`(parking.observeActiveSession()).thenReturn(active)
         `when`(streets.observeStreetsWithRules()).thenReturn(saved)
         `when`(settings.settings).thenReturn(preferences)
         coordinator = newCoordinator()
@@ -118,11 +125,11 @@ class ReminderCoordinatorTest {
         assertTrue(coordinator.selectPlan(7, 3, at(26, 14), true))
         val replacement = requireNotNull(dao.getPlan(7))
         assertNotEquals(old.id, replacement.id)
-        coordinator.cancelPlan(7, old.id)
+        assertFalse(coordinator.cancelPlan(7, old.id))
         assertEquals(replacement, dao.getPlan(7))
         coordinator.deliver(oldKey)
         assertNoNotifications()
-        coordinator.cancelPlan(7, replacement.id)
+        assertTrue(coordinator.cancelPlan(7, replacement.id))
         assertNull(dao.getPlan(7))
         assertTrue(moveEvents().isEmpty())
         assertEquals(warnings, deadlineEvents().map { it.key }.toSet())
@@ -277,11 +284,147 @@ class ReminderCoordinatorTest {
         assertFalse(dao.events.containsKey(event.key))
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun parkingMutationsSharePlanLockAndReconcileBeforeReportingCompletion() = runTest {
+        coordinator.refresh()
+        val finishMutation = CompletableDeferred<Unit>()
+        val mutation = async {
+            coordinator.mutateParking {
+                finishMutation.await()
+                active.value = active.value?.copy(id = 8)
+                "changed"
+            }
+        }
+        runCurrent()
+        assertTrue(coordinator.readiness.first().updating)
+        val oldSessionPlan = async { coordinator.selectPlan(7, 2, at(26, 14), true) }
+        runCurrent()
+        assertFalse(oldSessionPlan.isCompleted)
+        finishMutation.complete(Unit)
+        assertEquals("changed", mutation.await())
+        assertFalse(oldSessionPlan.await())
+        val readiness = coordinator.readiness.first()
+        assertFalse(readiness.updating)
+        assertEquals(8L, readiness.sessionId)
+        assertTrue(readiness.pending.all { it.sessionId == 8L })
+    }
+
+    @Test
+    fun failedSchedulingCannotPublishReadyFromAStoredButUnsafelyReconciledRecord() = runTest {
+        coordinator.refresh()
+        val warning = deadlineEvents().first()
+        doThrow(IllegalStateException("alarm service unavailable")).`when`(scheduler).schedule(warning.spec)
+        assertTrue(runCatching { coordinator.deliver(warning.key) }.isFailure)
+        assertTrue(coordinator.readiness.first().updating)
+        assertTrue(runCatching { coordinator.refresh() }.isFailure)
+        assertTrue(coordinator.readiness.first().updating)
+    }
+
+    @Test
+    fun readinessUsesStoredPendingWarningsAndDefaultGapIsNotCalledScheduled() = runTest {
+        assertTrue(coordinator.readiness.first().updating)
+        clock.now = at(26, 22)
+        preferences.value = ReminderSettings()
+        coordinator.refresh()
+        val readiness = coordinator.readiness.first()
+        assertFalse(readiness.updating)
+        assertTrue(readiness.pending.isEmpty())
+        assertEquals(ReminderSchedulingState.NO_UPCOMING, readiness.status(ReminderKind.PARKING_DEADLINE, clock.now).state)
+        assertTrue(dao.events.isEmpty())
+        preferences.value = preferences.value.copy(deadlineOffsetsMinutes = setOf(60))
+        assertTrue(coordinator.readiness.first().updating)
+        coordinator.refresh()
+        val scheduled = coordinator.readiness.first()
+        assertEquals(deadlineEvents().map { it.spec }, scheduled.pending)
+        assertEquals(ReminderSchedulingState.SCHEDULED, scheduled.status(ReminderKind.PARKING_DEADLINE, clock.now).state)
+    }
+
+    @Test
+    fun readinessExcludesDeliveredStaleCancelledAndSkippedRecords() = runTest {
+        coordinator.selectPlan(7, 2, at(26, 14), true)
+        val delivered = deadlineEvents().first()
+        clock.now = Instant.ofEpochMilli(delivered.spec.fireAt)
+        coordinator.deliver(delivered.key)
+        assertFalse(coordinator.readiness.first().pending.any { it.key == delivered.key })
+        val stale = delivered.spec.copy(sessionId = 99)
+        dao.saveReminder(ScheduledReminder(stale.key, stale))
+        coordinator.refresh()
+        assertFalse(coordinator.readiness.first().pending.any { it.sessionId == 99L })
+        val plan = requireNotNull(dao.getPlan(7))
+        coordinator.cancelPlan(7, plan.id)
+        val cancelled = coordinator.readiness.first()
+        assertFalse(cancelled.pending.any { it.kind == ReminderKind.PLANNED_MOVE })
+        assertEquals(ReminderSchedulingState.NO_TARGET, cancelled.status(ReminderKind.PLANNED_MOVE, clock.now).state)
+        assertEquals(1, cancelled.pending.size)
+    }
+
+    @Test
+    fun readinessBecomesUpdatingForChangedSessionSettingsPlanAndStreetInputs() = runTest {
+        coordinator.refresh()
+        assertFalse(coordinator.readiness.first().updating)
+        preferences.value = preferences.value.copy(deadlineOffsetsMinutes = emptySet())
+        assertTrue(coordinator.readiness.first().updating)
+        coordinator.refresh()
+        assertEquals(ReminderSchedulingState.NO_TIMES, coordinator.readiness.first().status(ReminderKind.PARKING_DEADLINE, clock.now).state)
+        preferences.value = preferences.value.copy(deadlineWarningsEnabled = false)
+        coordinator.refresh()
+        assertEquals(ReminderSchedulingState.OFF, coordinator.readiness.first().status(ReminderKind.PARKING_DEADLINE, clock.now).state)
+        saved.value = listOf(current.copy(street = current.street.copy(name = "Oak section")), target)
+        assertTrue(coordinator.readiness.first().updating)
+        coordinator.refresh()
+        assertFalse(coordinator.readiness.first().updating)
+        coordinator.selectPlan(7, 2, at(26, 14), true)
+        val selected = requireNotNull(dao.getPlan(7))
+        dao.savePlan(selected.copy(id = "replacement"))
+        assertTrue(coordinator.readiness.first().updating)
+        coordinator.refresh()
+        active.value = active.value?.copy(id = 8)
+        val newerSession = coordinator.readiness.first()
+        assertTrue(newerSession.updating)
+        assertEquals(8L, newerSession.sessionId)
+        assertTrue(newerSession.pending.isEmpty())
+        coordinator.refresh()
+        assertFalse(coordinator.readiness.first().updating)
+    }
+
+    @Test
+    fun pendingWarningsAndAtTimeMoveRemindersBecomeDueNotFutureWithoutNewAlarms() = runTest {
+        preferences.value = preferences.value.copy(moveOffsetsMinutes = setOf(0))
+        coordinator.selectPlan(7, 2, at(26, 14), true)
+        val readiness = coordinator.readiness.first()
+        val move = moveEvents().single()
+        assertEquals(ReminderSchedulingState.SCHEDULED, readiness.status(ReminderKind.PLANNED_MOVE, at(26, 13, 59)).state)
+        assertEquals(move.spec, readiness.status(ReminderKind.PLANNED_MOVE, at(26, 14)).reminder)
+        assertEquals(ReminderSchedulingState.DUE, readiness.status(ReminderKind.PLANNED_MOVE, at(26, 14)).state)
+        val warning = deadlineEvents().first()
+        assertEquals(ReminderSchedulingState.DUE, readiness.status(ReminderKind.PARKING_DEADLINE, Instant.ofEpochMilli(warning.spec.fireAt)).state)
+        clock.now = at(26, 14)
+        coordinator.deliver(move.key)
+        assertEquals(ReminderSchedulingState.NO_UPCOMING, coordinator.readiness.first().status(ReminderKind.PLANNED_MOVE, clock.now).state)
+    }
+
+    @Test
+    fun invalidPlanReadinessDoesNotHideIndependentDeadlineRecords() = runTest {
+        coordinator.selectPlan(7, 2, at(26, 14), true)
+        saved.value = listOf(current)
+        assertTrue(coordinator.readiness.first().updating)
+        coordinator.refresh()
+        val readiness = coordinator.readiness.first()
+        assertFalse(readiness.updating)
+        assertEquals(ReminderSchedulingState.CANCELLED, readiness.status(ReminderKind.PLANNED_MOVE, clock.now).state)
+        assertEquals(ReminderSchedulingState.SCHEDULED, readiness.status(ReminderKind.PARKING_DEADLINE, clock.now).state)
+        assertTrue(readiness.pending.all { it.kind == ReminderKind.PARKING_DEADLINE })
+    }
+
     @Test
     fun veryLatePlanReminderIsNotDeliveredAndDoesNotClearParking() = runTest {
         coordinator.selectPlan(7, 2, at(26, 14), true)
         val event = moveEvents().first { it.spec.offsetMinutes == 0L }
         clock.now = at(26, 16)
+        val readiness = coordinator.readiness.first()
+        assertEquals(ReminderSchedulingState.DUE, readiness.status(ReminderKind.PLANNED_MOVE, at(26, 14, 15)).state)
+        assertEquals(ReminderSchedulingState.NO_UPCOMING, readiness.status(ReminderKind.PLANNED_MOVE, at(26, 14, 16)).state)
         coordinator.deliver(event.key)
         assertNoNotifications()
         assertNotNull(active.value)

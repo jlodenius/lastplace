@@ -11,7 +11,7 @@ import dev.lastplace.app.data.settings.SettingsRepository
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
-enum class ParkSource { AUTO, MANUAL }
+enum class ParkSource { MANUAL }
 
 class StreetRepository(
     private val dao: StreetDao,

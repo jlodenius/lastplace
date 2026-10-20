@@ -1,7 +1,9 @@
 package dev.lastplace.app.data.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import dev.lastplace.app.domain.ReminderKind
 import kotlinx.coroutines.CoroutineScope
@@ -100,6 +102,31 @@ class SettingsRepositoryTest {
         assertEquals(setOf(0L, 60L), repository.settings.first().moveOffsetsMinutes)
     }
 
+    @Test
+    fun betaPreservesDefaultsEmptyDisabledSelectionsAndOpaqueLegacyPreferences() = runTest {
+        val file = temporaryFolder.newFolder().resolve("settings.preferences_pb")
+        val store = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
+        val repository = SettingsRepository(store)
+        assertEquals(setOf(1440L, 720L), repository.settings.first().deadlineOffsetsMinutes)
+        assertEquals(setOf(0L), repository.settings.first().moveOffsetsMinutes)
+        store.edit {
+            it[booleanPreferencesKey("auto_detect_enabled")] = false
+            it[stringSetPreferencesKey("deadline_offsets_minutes")] = emptySet()
+            it[stringSetPreferencesKey("move_offsets_minutes")] = emptySet()
+            it[booleanPreferencesKey("deadline_warnings_enabled")] = false
+            it[booleanPreferencesKey("move_reminders_enabled")] = false
+        }
+        val loaded = repository.settings.first()
+        assertTrue(loaded.deadlineOffsetsMinutes.isEmpty())
+        assertTrue(loaded.moveOffsetsMinutes.isEmpty())
+        assertEquals(false, loaded.deadlineWarningsEnabled)
+        assertEquals(false, loaded.moveRemindersEnabled)
+        repository.addReminderOffset(ReminderKind.PARKING_DEADLINE, 60)
+        repository.addReminderOffset(ReminderKind.PARKING_DEADLINE, 10)
+        assertEquals(setOf(60L, 10L), repository.settings.first().deadlineOffsetsMinutes)
+        assertEquals(false, store.data.first()[booleanPreferencesKey("auto_detect_enabled")])
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun negativeCustomOffsetsAreRejected() = runTest {
         val file = temporaryFolder.newFolder().resolve("settings.preferences_pb")
@@ -114,7 +141,6 @@ class SettingsRepositoryTest {
         val scope = CoroutineScope(coroutineContext + job)
         val repository = SettingsRepository(PreferenceDataStoreFactory.create(scope = scope) { file })
         repository.setReminderOffsets(ReminderKind.PARKING_DEADLINE, setOf(360, 120))
-        repository.setAutoDetect(false)
         repository.addReminderOffset(ReminderKind.PLANNED_MOVE, 10)
         repository.addReminderOffset(ReminderKind.PLANNED_MOVE, 60)
         repository.setReminderEnabled(ReminderKind.PARKING_DEADLINE, false)
@@ -125,7 +151,7 @@ class SettingsRepositoryTest {
         assertEquals(
             ReminderSettings(
                 deadlineOffsetsMinutes = setOf(360, 120), moveOffsetsMinutes = setOf(0, 10, 60),
-                deadlineWarningsEnabled = false, autoDetectEnabled = false, preferredReparkingTimes = setOf(afternoon),
+                deadlineWarningsEnabled = false, preferredReparkingTimes = setOf(afternoon),
             ),
             reopened.settings.first(),
         )

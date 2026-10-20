@@ -1,6 +1,8 @@
 package dev.lastplace.app.ui.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -11,6 +13,7 @@ import dev.lastplace.app.ui.addstreet.AddStreetScreen
 import dev.lastplace.app.ui.map.MapPickerResult
 import dev.lastplace.app.ui.map.MapPickerScreen
 import dev.lastplace.app.ui.settings.SettingsScreen
+import dev.lastplace.app.ui.settings.SettingsSection
 import dev.lastplace.app.ui.streets.ReparkingOptionsScreen
 import dev.lastplace.app.ui.streets.StreetListScreen
 
@@ -23,17 +26,21 @@ object Routes {
     const val ARG_STREET_ID = "streetId"
 
     fun editStreet(streetId: Long) = "$ADD_STREET?$ARG_STREET_ID=$streetId"
+    fun settings(section: SettingsSection) = "$SETTINGS?section=${section.name}"
 }
 
 @Composable
 fun ParkingNavHost() {
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = Routes.STREETS) {
-        composable(Routes.STREETS) {
+        composable(Routes.STREETS) { entry ->
+            val editorResult by entry.savedStateHandle.getStateFlow<String?>("street_editor_result", null).collectAsState()
             StreetListScreen(
                 onAddStreet = { navController.navigate(Routes.editStreet(-1L)) },
                 onEditStreet = { id -> navController.navigate(Routes.editStreet(id)) },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenSettings = { section -> navController.navigate(Routes.settings(section)) },
+                editorResult = editorResult,
+                onEditorResultHandled = { entry.savedStateHandle["street_editor_result"] = null },
                 onOpenReparkingOptions = { navController.navigate(Routes.REPARKING_OPTIONS) },
             )
         }
@@ -77,10 +84,19 @@ fun ParkingNavHost() {
             )
         }
         composable(Routes.REPARKING_OPTIONS) {
-            ReparkingOptionsScreen(onBack = { navController.popBackStack() })
+            ReparkingOptionsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenPreferredTimes = { navController.navigate(Routes.settings(SettingsSection.REPARKING_TIMES)) },
+                onOpenMoveReminderSettings = { navController.navigate(Routes.settings(SettingsSection.PLANNED_MOVES)) },
+            )
         }
-        composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+        composable(
+            route = "${Routes.SETTINGS}?section={section}",
+            arguments = listOf(navArgument("section") { defaultValue = SettingsSection.DELIVERY.name }),
+        ) { entry ->
+            val section = SettingsSection.entries.firstOrNull { it.name == entry.arguments?.getString("section") }
+                ?: SettingsSection.DELIVERY
+            SettingsScreen(onBack = { navController.popBackStack() }, initialSection = section)
         }
     }
 }

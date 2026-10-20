@@ -9,10 +9,11 @@ move your car before the next cleaning window.
 - **Add streets from real map data** — search a street by name or tap it on a map
   (OpenStreetMap). The app stores the street's full shape, so it recognizes you anywhere
   along it, not just one spot.
-- **Set cleaning hours** — for each street, add the weekdays and time windows when
-  parking isn't allowed.
+- **Set cleaning hours** — enter the weekdays and time windows from street signs, not the map.
+  New or changed schedules require explicit day/time choices and a cleaning-hours acknowledgment.
+  Overnight and 24-hour restrictions are explained before saving; name-only edits keep existing hours.
 - **See where you can park longest** — available streets are ranked by time until their next
-  cleaning, each showing how long it's free (e.g. **Free for 3d 5h**). Streets being cleaned
+  cleaning, each showing **Can stay …**, based on saved cleaning hours. Streets being cleaned
   show when parking becomes available and cannot be selected until cleaning ends. The list
   updates automatically as cleaning starts and ends, including overnight windows.
 - **Find daytime cleaning** — a positive sun badge highlights cleaning windows entirely
@@ -38,8 +39,10 @@ move your car before the next cleaning window.
   The options view integrates the selected plan into its street's card, alongside up to two
   alternatives. A changed opportunity on the same street stays in that card without replacing
   your chosen time until you explicitly select it.
-- **Park in one tap** — "Park where I am" uses your location to detect which saved street
-  you're on, or pick one manually.
+- **Register parking explicitly** — **Park where I am** uses a one-time location lookup, or choose
+  **I've parked here** on a saved street without location permission. Initial registration is one tap;
+  changing the parked street and ending parking ask for confirmation. The current street cannot restart
+  its own session. Separately named sections with overlapping map geometry may require manual selection.
 - **Choose independent reminders** — enable either or both **Planned move reminders** and
   **Parking deadline warnings**, or turn both off. Each supports multiple presets and custom
   offsets in minutes, hours, or days (up to 365 days); zero means at the time. For example, remind
@@ -51,8 +54,16 @@ move your car before the next cleaning window.
   Changing or cancelling a plan leaves deadline warnings alone. Ending parking clears that session's
   plan and alarms. Pending reminders are restored after reboot or an app update; stale and duplicate
   alarms are checked before delivery. Undelivered move reminders more than 15 minutes past the
-  planned time are suppressed. Android notification and precise-alarm restrictions are shown in
-  Settings; system restrictions can delay or block delivery.
+  planned time are suppressed. Home shows actual pending warnings separately from enabled preferences,
+  including no upcoming warnings and due/delayed alarms. App/channel notification blocking and precise
+  alarm limits have repair actions; system restrictions can delay or block delivery. Permission is
+  explained after parking or explicitly enabling reminders, never merely on launch.
+- **See when to move** — the Parking screen prioritizes the current street, countdown, exact local
+  deadline, and reminder status. Deadlines within two hours say **Move soon**; passed deadlines say
+  **Move now**. Plans remain secondary and never register arrival automatically.
+- **Recover from mistakes and failures** — search distinguishes no matches from service failure and
+  offers retry. Location errors keep a manual alternative visible. Unsaved editor changes ask before
+  discarding; deleting the parked street ends its session and clears its plan and reminders.
 
 Everything is stored locally on your device — no account, no servers.
 
@@ -66,7 +77,16 @@ android-studio
 ```
 
 Open the project, let Gradle sync, then Run ▶ on your phone (with USB debugging on) or an
-emulator. Run the tests with `./gradlew test`.
+emulator. Run the local checks with:
+
+```bash
+./gradlew testDebugUnitTest testReleaseUnitTest lintDebug assembleDebug
+./gradlew connectedDebugAndroidTest
+```
+
+The second command requires a connected device/emulator. The reversible UI beta plan is in
+[`BETA.md`](BETA.md); implementation checks and outstanding device/release checks are recorded in
+[`BETA-VALIDATION.md`](BETA-VALIDATION.md).
 
 ## Releasing an update
 
@@ -101,6 +121,12 @@ Notes:
 - Signing is handled in CI using the release keystore stored in the repo's GitHub
   Secrets — every release is signed with the same key, which is what lets updates install
   cleanly. Keep that keystore (and its passwords) backed up.
+- Tags containing `-beta.` (for example, `v0.4.0-beta.1`) publish as prereleases; ordinary tags
+  remain normal releases. Publishing a beta requires explicit approval. Enable prereleases in
+  Obtainium or manually install the signed APK, without uninstalling or clearing application data.
+  A local debug-signed build cannot update an existing release-signed installation.
+- Revert the single beta commit to undo the experiment, then publish a newly versioned signed
+  recovery release with a higher CI version code. Do not downgrade by uninstalling the beta.
 
 ## Built with
 

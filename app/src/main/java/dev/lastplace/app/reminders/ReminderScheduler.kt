@@ -72,19 +72,16 @@ class ReminderScheduler(private val context: Context) {
         }
     }
 
-    fun deliveryNotice(): String? {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-            return "Android notifications are blocked for LastPlace. Enable them in system notification settings."
-        }
+    fun capabilities(): ReminderCapabilities {
         val manager = context.getSystemService(NotificationManager::class.java)
-        val blocked = listOf(Notifications.CHANNEL_REMINDERS, Notifications.CHANNEL_MOVES).mapNotNull {
-            manager.getNotificationChannel(it)?.takeIf { channel -> channel.importance == NotificationManager.IMPORTANCE_NONE }?.name
-        }
-        if (blocked.isNotEmpty()) return "Blocked in Android notification settings: ${blocked.joinToString()}."
-        if (Build.VERSION.SDK_INT >= 31 && !alarmManager.canScheduleExactAlarms()) {
-            return "Precise alarms are not allowed. Reminders may be delayed by Android."
-        }
-        return null
+        fun channelAllowed(id: String) = Build.VERSION.SDK_INT < 26 ||
+            manager.getNotificationChannel(id)?.importance != NotificationManager.IMPORTANCE_NONE
+        return ReminderCapabilities(
+            appNotificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled(),
+            deadlineChannelAllowed = channelAllowed(Notifications.CHANNEL_REMINDERS),
+            moveChannelAllowed = channelAllowed(Notifications.CHANNEL_MOVES),
+            preciseAlarmsAllowed = canSchedulePrecisely(),
+        )
     }
 
     companion object {

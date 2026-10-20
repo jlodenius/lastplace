@@ -9,11 +9,16 @@ import dev.lastplace.app.data.db.ScheduledReminder
 import dev.lastplace.app.data.db.StreetWithRules
 import dev.lastplace.app.data.db.rulesSignature
 import dev.lastplace.app.data.db.toWindow
+import dev.lastplace.app.data.settings.ReminderSettings
 import dev.lastplace.app.data.settings.SettingsRepository
 import dev.lastplace.app.domain.ReminderKind
 import dev.lastplace.app.domain.ReminderSpec
 import dev.lastplace.app.domain.ScheduleEngine
 import dev.lastplace.app.domain.reminderPlan
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -34,6 +39,26 @@ class ReminderCoordinator(
 ) {
     private val mutex = Mutex()
     val plans = dao.observePlans()
+    private val reconciled = MutableStateFlow<ReconciledReminders?>(null)
+    val readiness: Flow<ReminderReadiness> = combine(
+        combine(
+            parking.observeActiveSession(), streets.observeStreetsWithRules(), settings.settings, plans,
+        ) { session, saved, preferences, plans ->
+            reminderInputs(session, saved, preferences, plans.firstOrNull { it.sessionId == session?.id })
+        },
+        reconciled,
+    ) { inputs, snapshot ->
+        val current = snapshot?.takeIf { it.inputs == inputs }
+        ReminderReadiness(
+            sessionId = inputs.session?.id,
+            planId = inputs.plan?.id,
+            updating = current == null,
+            pending = current?.pending.orEmpty(),
+            settings = inputs.settings,
+            deadline = inputs.session?.deadline,
+            planInvalidReason = inputs.plan?.invalidReason,
+        )
+    }.distinctUntilChanged()
 
     suspend fun getPlan(sessionId: Long): PlannedMove? = dao.getPlan(sessionId)
 
@@ -59,36 +84,53 @@ class ReminderCoordinator(
         true
     }
 
-    suspend fun cancelPlan(sessionId: Long, planId: String) = mutex.withLock {
+    suspend fun cancelPlan(sessionId: Long, planId: String): Boolean = mutex.withLock {
+        if (parking.getActiveSession()?.id != sessionId || dao.getPlan(sessionId)?.id != planId) return@withLock false
         dao.deletePlan(sessionId, planId)
         reconcile()
+        true
     }
 
     suspend fun refresh() = mutex.withLock { reconcile() }
 
+    suspend fun <T> mutateParking(mutation: suspend () -> T): T = mutex.withLock {
+        reconciled.value = null
+        val result = mutation()
+        reconcile()
+        result
+    }
+
     suspend fun deliver(key: String) = mutex.withLock {
-        val current = desiredReminders()
-        val stored = dao.getReminders().firstOrNull { it.key == key } ?: return@withLock
+        reconciled.value = null
+        val prepared = desiredReminders()
+        deliverPrepared(key, prepared.specs)
+        publishReadiness(prepared)
+    }
+
+    private suspend fun deliverPrepared(key: String, current: List<ReminderSpec>) {
+        val stored = dao.getReminders().firstOrNull { it.key == key } ?: return
         val desired = current.firstOrNull { it.key == key }
         if (desired == null) {
             scheduler.cancel(stored.spec)
             dao.deleteReminder(key)
-            return@withLock
+            return
         }
-        if (stored.delivered) return@withLock
+        if (stored.delivered) return
         val now = clock.instant().toEpochMilli()
         if (desired.fireAt > now) {
             scheduler.schedule(desired)
-            return@withLock
+            return
         }
         dao.saveReminder(ScheduledReminder(key, desired, delivered = true))
         // A phone starting late should not replay a long-missed move opportunity.
-        if (desired.kind == ReminderKind.PLANNED_MOVE && now > desired.targetAt + MOVE_DELIVERY_GRACE_MILLIS) return@withLock
+        if (desired.kind == ReminderKind.PLANNED_MOVE && now > desired.targetAt + MOVE_DELIVERY_GRACE_MILLIS) return
         scheduler.show(desired)
     }
 
     private suspend fun reconcile(allowImmediatePlanId: String? = null) {
-        val desired = desiredReminders().associateBy { it.key }
+        reconciled.value = null
+        val prepared = desiredReminders()
+        val desired = prepared.specs.associateBy { it.key }
         val existing = dao.getReminders().associateBy { it.key }
         existing.values.filter { it.key !in desired }.forEach {
             scheduler.cancel(it.spec)
@@ -103,15 +145,24 @@ class ReminderCoordinator(
             dao.saveReminder(reminder)
             if (!reminder.delivered) scheduler.schedule(spec)
         }
+        publishReadiness(prepared)
     }
 
-    private suspend fun desiredReminders(): List<ReminderSpec> {
+    private suspend fun publishReadiness(prepared: PreparedReminders) {
+        val desired = prepared.specs.associateBy { it.key }
+        reconciled.value = ReconciledReminders(
+            prepared.inputs,
+            dao.getReminders().filter { !it.delivered && desired[it.key] == it.spec }.map { it.spec },
+        )
+    }
+
+    private suspend fun desiredReminders(): PreparedReminders {
         val active = parking.getActiveSession()
         dao.deleteOtherPlans(active?.id ?: -1)
-        if (active == null) return emptyList()
-        scheduler.cancelLegacy(active.id)
         val saved = streets.observeStreetsWithRules().first()
         val preferences = settings.settings.first()
+        if (active == null) return PreparedReminders(reminderInputs(null, saved, preferences, null), emptyList())
+        scheduler.cancelLegacy(active.id)
         val deadline = currentDeadline(active, saved, engine, clock.zone)
         if (deadline?.toEpochMilli() != active.deadline) parking.updateDeadline(active.id, deadline)
         val currentName = saved.firstOrNull { it.street.id == active.streetId }?.street?.name ?: "your current street"
@@ -123,7 +174,7 @@ class ReminderCoordinator(
                 dao.savePlan(requireNotNull(plan))
             }
         }
-        return buildList {
+        val specs = buildList {
             if (preferences.deadlineWarningsEnabled && deadline != null) {
                 addAll(reminderPlan(active.id, ReminderKind.PARKING_DEADLINE, deadline, preferences.deadlineOffsetsMinutes, currentName))
             }
@@ -132,10 +183,35 @@ class ReminderCoordinator(
                 addAll(reminderPlan(active.id, ReminderKind.PLANNED_MOVE, Instant.ofEpochMilli(it.moveAt), preferences.moveOffsetsMinutes, name, it.id))
             }
         }
+        return PreparedReminders(reminderInputs(active, saved, preferences, plan), specs)
     }
+
+    private fun reminderInputs(
+        active: ParkingSession?,
+        saved: List<StreetWithRules>,
+        preferences: ReminderSettings,
+        plan: PlannedMove?,
+    ) = ReminderInputs(
+        active?.copy(deadline = currentDeadline(active, saved, engine, clock.zone)?.toEpochMilli()),
+        saved.map { ReminderStreet(it.street.id, it.street.name, it.rulesSignature()) }.sortedBy { it.id },
+        preferences,
+        plan,
+        clock.zone,
+    )
 }
 
-private const val MOVE_DELIVERY_GRACE_MILLIS = 15 * 60_000L
+private data class ReminderStreet(val id: Long, val name: String, val rules: String)
+private data class ReminderInputs(
+    val session: ParkingSession?,
+    val streets: List<ReminderStreet>,
+    val settings: ReminderSettings,
+    val plan: PlannedMove?,
+    val zone: ZoneId,
+)
+private data class PreparedReminders(val inputs: ReminderInputs, val specs: List<ReminderSpec>)
+private data class ReconciledReminders(val inputs: ReminderInputs, val pending: List<ReminderSpec>)
+
+internal const val MOVE_DELIVERY_GRACE_MILLIS = 15 * 60_000L
 
 fun currentDeadline(
     session: ParkingSession,

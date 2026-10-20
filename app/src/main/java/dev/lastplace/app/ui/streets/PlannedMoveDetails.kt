@@ -2,25 +2,30 @@ package dev.lastplace.app.ui.streets
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.lastplace.app.domain.ReparkingOption
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PlannedMoveDetails(
     plan: PlannedMoveUi,
@@ -28,51 +33,56 @@ internal fun PlannedMoveDetails(
     onArrived: () -> Unit,
     onChangePlan: (() -> Unit)? = null,
     option: ReparkingOption? = null,
+    compact: Boolean = false,
+    isBusy: Boolean = false,
+    reminderDetails: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Planned move", fontWeight = FontWeight.Bold)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(plan.streetName, modifier = Modifier.weight(1f, fill = false), fontWeight = FontWeight.Medium)
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Planned move", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(plan.streetName, modifier = Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium)
             if (plan.isFavourite) {
-                Icon(
-                    Icons.Filled.Star,
-                    contentDescription = "Favourite",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Icon(Icons.Filled.Star, contentDescription = "Favourite destination", modifier = Modifier.size(18.dp))
             }
         }
         Text(if (option?.justCleaned == true) "${plan.timeText} · Just cleaned then" else plan.timeText)
-        option?.let { ReparkingStayDetails(it) }
-        plan.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        option?.takeUnless { compact }?.let { ReparkingStayDetails(it) }
+        plan.problem?.let { problem ->
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Text(problem, color = MaterialTheme.colorScheme.error)
+            }
+        }
         if (plan.timePassed) {
-            Text("The planned time has passed. Confirm if you moved, or choose a new plan.", style = MaterialTheme.typography.bodySmall)
+            Text(if (plan.problem == null) "The planned time has passed. Confirm if you moved, or choose a new plan."
+            else "The planned time has passed.")
         }
-        plan.remindersText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        if (!plan.isAvailableNow) {
-            Text("Destination is not available to park now.", style = MaterialTheme.typography.bodySmall)
+        plan.remindersText?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        reminderDetails?.invoke()
+        if (plan.problem != null) {
+            Text("Arrival is disabled. Change or cancel this plan.")
+        } else if (!plan.isAvailableNow) {
+            Text("Destination is unavailable now. Arrival is disabled until its saved cleaning hours allow it.")
         }
-        Column(
+        FlowRow(
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Button(onClick = onArrived, enabled = plan.isAvailableNow, modifier = Modifier.fillMaxWidth()) {
-                Text("I've parked here")
-            }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                onChangePlan?.let {
-                    OutlinedButton(
-                        onClick = it,
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                    ) { Text("Change plan") }
+            if (compact) {
+                OutlinedButton(onClick = onArrived, enabled = plan.isAvailableNow && plan.problem == null && !isBusy) {
+                    Text("I've parked here")
                 }
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                ) { Text("Cancel plan") }
+            } else {
+                Button(onClick = onArrived, enabled = plan.isAvailableNow && plan.problem == null && !isBusy) {
+                    Text("I've parked here")
+                }
             }
+            onChangePlan?.let {
+                TextButton(onClick = it, enabled = !isBusy) { Text("Change plan") }
+            }
+            TextButton(onClick = onCancel, enabled = !isBusy) { Text("Cancel plan") }
         }
     }
 }

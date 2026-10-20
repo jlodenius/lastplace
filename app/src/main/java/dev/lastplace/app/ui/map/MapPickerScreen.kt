@@ -76,12 +76,12 @@ fun MapPickerScreen(
         }
     }
     val locationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> if (granted) centerOnCurrentLocation() }
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants -> if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true) centerOnCurrentLocation() }
     LaunchedEffect(Unit) {
         if (initial == null) {
             if (container.locationProvider.hasPermission()) centerOnCurrentLocation()
-            else locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            else locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
 

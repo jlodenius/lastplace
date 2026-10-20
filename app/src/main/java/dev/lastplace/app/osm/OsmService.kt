@@ -9,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
@@ -52,16 +53,23 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
                 if (near != null) append("&lat=${near.lat}&lon=${near.lng}")
             }
             val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-            runCatching {
+            try {
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
-                        Log.w(TAG, "searchStreets: HTTP ${response.code}")
-                        return@use emptyList()
+                        val reason = when (response.code) {
+                            429 -> "Search is rate limited. Wait a moment and retry."
+                            in 500..599 -> "Search service is unavailable (${response.code})."
+                            else -> "Search request failed (${response.code})."
+                        }
+                        throw OsmRequestException(reason)
                     }
                     parsePhoton(response.body?.string().orEmpty())
                 }
-            }.onFailure { Log.w(TAG, "searchStreets: request failed", it) }
-                .getOrDefault(emptyList())
+            } catch (e: IOException) {
+                throw OsmRequestException("Network error. Check your connection and retry.")
+            } catch (e: JSONException) {
+                throw OsmRequestException("Search service returned an unreadable response. Retry in a moment.")
+            }
         }
 
     /**
@@ -129,7 +137,7 @@ class OsmService(private val client: OkHttpClient = OkHttpClient()) {
     }
 
     private fun parsePhoton(body: String): List<StreetSuggestion> {
-        val features = JSONObject(body).optJSONArray("features") ?: return emptyList()
+        val features = JSONObject(body).getJSONArray("features")
         val results = mutableListOf<Pair<StreetSuggestion, Boolean>>() // suggestion, isHighway
         for (i in 0 until features.length()) {
             val feature = features.optJSONObject(i) ?: continue

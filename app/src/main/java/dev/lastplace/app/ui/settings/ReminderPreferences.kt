@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
@@ -22,7 +25,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.lastplace.app.data.settings.ReminderSettings
@@ -38,17 +43,18 @@ internal fun ReminderPreferences(
     description: String,
     settings: ReminderSettings,
     viewModel: SettingsViewModel,
+    onEnabled: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var adding by rememberSaveable { mutableStateOf(false) }
     val enabled = settings.enabled(kind)
     val offsets = settings.offsets(kind)
-    val presets = if (kind == ReminderKind.PLANNED_MOVE) setOf(0L, 10, 30, 60, 120)
-        else setOf(0L, 120, 360, 720, 1440, 2880)
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-        Switch(checked = enabled, onCheckedChange = { viewModel.setReminderEnabled(kind, it) })
-    }
-    Text(description, style = MaterialTheme.typography.bodySmall)
+    val presets = reminderPresets(kind)
+    ReminderToggleRow(title, enabled, modifier = modifier, onCheckedChange = {
+        viewModel.setReminderEnabled(kind, it)
+        if (it) onEnabled()
+    })
+    Text(description, style = MaterialTheme.typography.bodyMedium)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         (presets + offsets).sortedDescending().forEach { minutes ->
             FilterChip(
@@ -59,7 +65,7 @@ internal fun ReminderPreferences(
             )
         }
     }
-    if (enabled && offsets.isEmpty()) Text("No reminder times selected.", style = MaterialTheme.typography.bodySmall)
+    if (enabled && offsets.isEmpty()) Text("No reminder times selected.", style = MaterialTheme.typography.bodyMedium)
     TextButton(enabled = enabled, onClick = { adding = true }) { Text("Add custom reminder") }
     if (adding) {
         CustomReminderDialog(
@@ -70,6 +76,27 @@ internal fun ReminderPreferences(
             },
         )
     }
+}
+
+@Composable
+internal fun ReminderToggleRow(
+    title: String,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().toggleable(value = enabled, role = Role.Switch, onValueChange = onCheckedChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, modifier = Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+        Switch(checked = enabled, onCheckedChange = null)
+    }
+}
+
+internal fun reminderPresets(kind: ReminderKind): Set<Long> = when (kind) {
+    ReminderKind.PLANNED_MOVE -> setOf(0L, 10, 30, 60, 120)
+    ReminderKind.PARKING_DEADLINE -> setOf(0L, 10, 60, 120, 360, 720, 1440, 2880)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -83,7 +110,7 @@ private fun CustomReminderDialog(onDismiss: () -> Unit, onAdd: (Long) -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Add reminder before the time") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it },

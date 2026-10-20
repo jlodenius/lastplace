@@ -45,7 +45,7 @@ class StreetRowsTest {
         val after = buildStreetRows(streets, at(14), engine, false).single()
         assertTrue(after.isAvailable)
         assertNull(after.unavailableUntilText)
-        assertEquals("6d 19h", after.freeFor)
+        assertEquals("6 days 19 hours", after.freeFor)
         assertNotNull(after.nextCleaningText)
     }
 
@@ -114,6 +114,34 @@ class StreetRowsTest {
         assertTrue(row.hasDaytimeCleaning)
         assertTrue(row.daytimeCleaningText!!.contains("09:00–14:00"))
         assertFalse(row.daytimeCleaningText.contains("22:00"))
+    }
+
+    @Test
+    fun customStreetSectionsRemainIndependentWithTheirOwnHours() {
+        val main = street(1, rule(day = 5)).let { it.copy(street = it.street.copy(name = "Ynglingagatan")) }
+        val turning = street(2, rule(day = 3)).let { it.copy(street = it.street.copy(name = "Ynglingagatan vändplan")) }
+        val rows = buildStreetRows(listOf(main, turning), at(10), engine, false)
+        assertEquals(listOf("Ynglingagatan", "Ynglingagatan vändplan"), rows.map { it.name })
+        assertEquals(listOf(1L, 2L), rows.map { it.id })
+        assertTrue(rows[0].nextCleaningText!!.contains("29"))
+        assertTrue(rows[1].nextCleaningText!!.contains("27"))
+    }
+
+    @Test
+    fun sameWeekdayAndSharedGeometryDoNotMergeNamedStreetSections() {
+        val main = street(1, rule(day = 5, start = 8 * 60)).let {
+            it.copy(street = it.street.copy(name = "Ynglingagatan", geometry = "[[[59.3,18.0],[59.4,18.0]]]"))
+        }
+        val turning = main.copy(
+            street = main.street.copy(id = 2, name = "Ynglingagatan vändplan"),
+            rules = listOf(rule(day = 5, start = 10 * 60)),
+        )
+        val rows = buildStreetRows(listOf(main, turning), at(10), engine, false)
+        assertEquals(2, rows.size)
+        assertEquals("Ynglingagatan", rows.single { it.id == 1L }.name)
+        assertEquals("Ynglingagatan vändplan", rows.single { it.id == 2L }.name)
+        assertTrue(rows.single { it.id == 1L }.nextCleaningText!!.contains("08:00"))
+        assertTrue(rows.single { it.id == 2L }.nextCleaningText!!.contains("10:00"))
     }
 
     @Test
