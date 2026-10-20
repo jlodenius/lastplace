@@ -221,7 +221,7 @@ class ParkingScreensTest {
         problem = null,
         timePassed = false,
         isAvailableNow = true,
-        remindersText = "Planned move reminder scheduled: Tue 26 May, 14:00",
+        remindersText = "Notification scheduled: Tue 26 May, 14:00",
     )
 
     @Test

@@ -228,7 +228,7 @@ class StreetListViewModelTest {
         val model = viewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.uiState.collect() }
         runCurrent()
-        assertTrue(model.uiState.value.plannedMove!!.remindersText!!.startsWith("Planned move reminder scheduled:"))
+        assertTrue(model.uiState.value.plannedMove!!.remindersText!!.startsWith("Notification scheduled:"))
         assertEquals(setOf(60L, 10L, 0L), preferences.value.moveOffsetsMinutes)
 
         `when`(clock.instant()).thenReturn(at(14, 2))

@@ -1,11 +1,54 @@
 package dev.lastplace.app.ui.streets
 
+import dev.lastplace.app.domain.ReminderKind
+import dev.lastplace.app.domain.ReminderSpec
+import dev.lastplace.app.reminders.ReminderSchedulingState
+import dev.lastplace.app.reminders.ReminderStatus
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.ZonedDateTime
 
 class ParkingPresentationTest {
     private val now = ZonedDateTime.parse("2026-05-26T06:00:00+02:00[Europe/Stockholm]")
+
+    private fun notificationStatus(state: ReminderSchedulingState, kind: ReminderKind) = ReminderStatus(
+        state,
+        ReminderSpec(
+            sessionId = 7,
+            kind = kind,
+            targetAt = now.plusHours(2).toInstant().toEpochMilli(),
+            fireAt = now.toInstant().toEpochMilli(),
+            offsetMinutes = 120,
+            streetName = "Ynglingagatan",
+        ),
+    )
+
+    @Test
+    fun bothReminderKindsUseTheSameScheduledNotificationTextAndLocalTime() {
+        ReminderKind.entries.forEach { kind ->
+            assertEquals(
+                "Notification scheduled: ${now.format(parkingTimeFormatter)}",
+                reminderStatusText(notificationStatus(ReminderSchedulingState.SCHEDULED, kind), kind, now.zone),
+            )
+        }
+    }
+
+    @Test
+    fun bothReminderKindsUseTheSameDueTextWithoutClaimingFutureScheduling() {
+        ReminderKind.entries.forEach { kind ->
+            assertEquals(
+                "Notification due or delayed: ${now.format(parkingTimeFormatter)}",
+                reminderStatusText(notificationStatus(ReminderSchedulingState.DUE, kind), kind, now.zone),
+            )
+        }
+    }
+
+    @Test
+    fun disabledStatusStillIdentifiesTheRelevantReminderGroup() {
+        val status = ReminderStatus(ReminderSchedulingState.OFF)
+        assertEquals("Deadline warnings off", reminderStatusText(status, ReminderKind.PARKING_DEADLINE, now.zone))
+        assertEquals("Planned move reminders off", reminderStatusText(status, ReminderKind.PLANNED_MOVE, now.zone))
+    }
 
     @Test
     fun urgencyChangesAtTwoHoursAndTheExactDeadline() {

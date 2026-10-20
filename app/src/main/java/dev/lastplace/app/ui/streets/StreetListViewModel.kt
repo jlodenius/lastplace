@@ -295,7 +295,6 @@ class StreetListViewModel(
 
 internal fun reminderStatusText(status: ReminderStatus, kind: ReminderKind, zone: ZoneId): String {
     val deadline = kind == ReminderKind.PARKING_DEADLINE
-    val label = if (deadline) "Deadline warning" else "Planned move reminder"
     return when (status.state) {
         ReminderSchedulingState.UPDATING -> "Updating reminder status…"
         ReminderSchedulingState.OFF -> if (deadline) "Deadline warnings off" else "Planned move reminders off"
@@ -305,8 +304,8 @@ internal fun reminderStatusText(status: ReminderStatus, kind: ReminderKind, zone
         ReminderSchedulingState.NO_UPCOMING -> if (deadline) "No upcoming deadline warnings. Adding an already-past warning time will not help." else "No upcoming plan reminders"
         ReminderSchedulingState.SCHEDULED, ReminderSchedulingState.DUE -> {
             val time = Instant.ofEpochMilli(requireNotNull(status.reminder).fireAt).atZone(zone).format(parkingTimeFormatter)
-            if (status.state == ReminderSchedulingState.DUE) "$label due or delayed: $time"
-            else "$label scheduled: $time"
+            if (status.state == ReminderSchedulingState.DUE) "Notification due or delayed: $time"
+            else "Notification scheduled: $time"
         }
     }
 }
