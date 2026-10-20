@@ -1,62 +1,33 @@
 package dev.lastplace.app.ui.streets
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.lastplace.app.domain.ReparkingOption
-
-@Composable
-internal fun PlannedMoveCard(
-    plan: PlannedMoveUi,
-    onCancel: () -> Unit,
-    onArrived: () -> Unit,
-    onChangePlan: () -> Unit,
-    isBusy: Boolean = false,
-    reminderDetails: (@Composable () -> Unit)? = null,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().testTag("planned-move-card"),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-    ) {
-        PlannedMoveDetails(
-            plan = plan,
-            onCancel = onCancel,
-            onArrived = onArrived,
-            onChangePlan = onChangePlan,
-            isBusy = isBusy,
-            reminderDetails = reminderDetails,
-            modifier = Modifier.padding(16.dp),
-        )
-    }
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -71,10 +42,7 @@ internal fun PlannedMoveDetails(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
-            Text("Planned move", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-        }
+        MoveCardHeading("Planned move")
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(plan.streetName, modifier = Modifier.weight(1f, fill = false), style = MaterialTheme.typography.headlineSmall)
             if (plan.isFavourite) {
@@ -103,18 +71,43 @@ internal fun PlannedMoveDetails(
         } else if (!plan.isAvailableNow) {
             Text("Destination is unavailable now. Arrival is disabled until its saved cleaning hours allow it.")
         }
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(onClick = onArrived, enabled = plan.isAvailableNow && plan.problem == null && !isBusy) {
-                Text("I've parked here")
+            Button(
+                onClick = onArrived,
+                enabled = plan.isAvailableNow && plan.problem == null && !isBusy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text("I've parked here", textAlign = TextAlign.Center) }
+            if (onChangePlan == null) {
+                PlanSecondaryAction("Cancel plan", onCancel, !isBusy, Modifier.fillMaxWidth())
+            } else {
+                val fontScale = LocalDensity.current.fontScale
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    if (maxWidth / fontScale < 280.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PlanSecondaryAction("Change plan", onChangePlan, !isBusy, Modifier.fillMaxWidth())
+                            PlanSecondaryAction("Cancel plan", onCancel, !isBusy, Modifier.fillMaxWidth())
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PlanSecondaryAction("Change plan", onChangePlan, !isBusy, Modifier.weight(1f).fillMaxHeight())
+                            PlanSecondaryAction("Cancel plan", onCancel, !isBusy, Modifier.weight(1f).fillMaxHeight())
+                        }
+                    }
+                }
             }
-            onChangePlan?.let {
-                TextButton(onClick = it, enabled = !isBusy) { Text("Change plan") }
-            }
-            TextButton(onClick = onCancel, enabled = !isBusy) { Text("Cancel plan") }
         }
+    }
+}
+
+@Composable
+private fun PlanSecondaryAction(label: String, onClick: () -> Unit, enabled: Boolean, modifier: Modifier) {
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 48.dp)) {
+        Text(label, textAlign = TextAlign.Center)
     }
 }

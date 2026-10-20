@@ -167,7 +167,7 @@ fun StreetListScreen(
         },
         planReminderDetails = {
             ReminderDeliveryBlockers(capabilities, ReminderKind.PLANNED_MOVE)
-            TextButton(onClick = { onOpenSettings(SettingsSection.PLANNED_MOVES) }) { Text("Move reminder settings") }
+            TextButton(onClick = { onOpenSettings(SettingsSection.PLANNED_MOVES) }) { Text("Reminder settings") }
         },
     )
 }
@@ -287,27 +287,14 @@ internal fun StreetListContent(
                         } ?: state.active?.let { active ->
                             if (active.hasDeadline) {
                                 item {
-                                    Column(modifier = Modifier.padding(top = ParkingLayout.spacing), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("Suggested move", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-                                        if (!state.hasPreferredTimes) {
-                                            Text("No preferred re-parking times selected")
-                                            TextButton(onClick = onOpenPreferredTimes) { Text("Choose times") }
-                                        }
-                                        val option = state.reparkingOptions.firstOrNull()
-                                        if (state.hasPreferredTimes && option?.justCleaned != true) {
-                                            Text("No suitable opportunity at your preferred times before this deadline.")
-                                        }
-                                        if (option != null) {
-                                            Text(option.street.name, style = MaterialTheme.typography.titleMedium)
-                                            Text(if (option.justCleaned) option.moveAt.format(parkingTimeFormatter) else "Move now · Longest stay")
-                                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                OutlinedButton(onClick = { onSelectPlan(option) }, enabled = !mutationInProgress) { Text("Plan this move") }
-                                                TextButton(onClick = onOpenReparkingOptions) { Text("View options") }
-                                            }
-                                        } else {
-                                            Text("No other saved street is available. Check another location before your deadline.")
-                                        }
-                                    }
+                                    SuggestedMoveCard(
+                                        option = state.reparkingOptions.firstOrNull(),
+                                        hasPreferredTimes = state.hasPreferredTimes,
+                                        onPlan = onSelectPlan,
+                                        onOpenOptions = onOpenReparkingOptions,
+                                        onChooseTimes = onOpenPreferredTimes,
+                                        isBusy = mutationInProgress,
+                                    )
                                 }
                             }
                         }

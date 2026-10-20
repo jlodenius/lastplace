@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -57,7 +58,6 @@ import dev.lastplace.app.ui.theme.ParkingLayout
 @Composable
 fun ReparkingOptionsScreen(
     onBack: () -> Unit,
-    onOpenPreferredTimes: () -> Unit = {},
     onOpenMoveReminderSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -90,14 +90,13 @@ fun ReparkingOptionsScreen(
         mutationInProgress = mutationRunning,
         actionError = actionError,
         onBack = onBack,
-        onOpenPreferredTimes = onOpenPreferredTimes,
         onSelectPlan = { viewModel.selectPlan(it) },
         onCancelPlan = { viewModel.cancelPlan(it.plan.sessionId, it.plan.id) },
         onArrived = { viewModel.arriveAtPlan(it.plan.sessionId, it.plan.id) },
         snackbarHost = snackbarHost,
         planReminderDetails = {
             ReminderDeliveryBlockers(capabilities, ReminderKind.PLANNED_MOVE)
-            TextButton(onClick = onOpenMoveReminderSettings) { Text("Move reminder settings") }
+            TextButton(onClick = onOpenMoveReminderSettings) { Text("Reminder settings") }
         },
     )
 }
@@ -109,7 +108,6 @@ internal fun ReparkingOptionsContent(
     mutationInProgress: Boolean = false,
     actionError: String? = null,
     onBack: () -> Unit = {},
-    onOpenPreferredTimes: () -> Unit = {},
     onSelectPlan: (ReparkingOption) -> Unit = {},
     onCancelPlan: (PlannedMoveUi) -> Unit = {},
     onArrived: (PlannedMoveUi) -> Unit = {},
@@ -132,7 +130,7 @@ internal fun ReparkingOptionsContent(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
             LazyColumn(
-                modifier = Modifier.widthIn(max = ParkingLayout.contentWidth).fillMaxWidth(),
+                modifier = Modifier.widthIn(max = ParkingLayout.contentWidth).fillMaxWidth().testTag("reparking-options-content"),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -152,35 +150,20 @@ internal fun ReparkingOptionsContent(
                             } else {
                                 Text("No cleaning deadline in saved hours")
                             }
-                            Text("Based on saved cleaning hours, not live parking spaces. Planning never registers parking.")
-                            when {
-                                !state.hasPreferredTimes -> {
-                                    Text("No preferred re-parking times selected")
-                                    TextButton(onClick = onOpenPreferredTimes) { Text("Choose times") }
-                                }
-                                state.reparkingOptions.firstOrNull()?.justCleaned == true -> {
-                                    Text("Up to three just-cleaned destinations at your preferred times, latest opportunity first. They may not be available now.")
-                                }
-                                active.hasDeadline -> {
-                                    Text("No suitable opportunity at your preferred times is available before this deadline. Alternatives available now are ordered by longest stay.")
-                                }
-                            }
-                            if (state.plannedMove != null) {
-                                Text("Your selected plan stays fixed. Choosing another option replaces it, not your current parking.")
-                            }
-                            if (state.reparkingOptions.isEmpty() && active.hasDeadline) {
-                                Text(if (state.plannedMove != null) "No alternative saved streets are available right now."
-                                else "No other saved street is available. Check another location before your deadline.")
-                            }
                         }
                     }
-                    actionError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
+                }
+                actionError?.let { error ->
+                    item { Text(error, color = MaterialTheme.colorScheme.error) }
                 }
                 if (!state.isLoading && state.active != null) {
+                    if (cards.isEmpty()) {
+                        item { Text("No re-parking options available.") }
+                    }
                     items(cards, key = { it.streetId }) { card ->
                         val selected = card.plannedMove != null
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().testTag("reparking-option-${card.streetId}"),
                             border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
                             colors = CardDefaults.cardColors(
                                 containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,

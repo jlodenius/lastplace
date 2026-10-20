@@ -86,7 +86,6 @@ fun ParkingNavHost() {
         composable(Routes.REPARKING_OPTIONS) {
             ReparkingOptionsScreen(
                 onBack = { navController.popBackStack() },
-                onOpenPreferredTimes = { navController.navigate(Routes.settings(SettingsSection.REPARKING_TIMES)) },
                 onOpenMoveReminderSettings = { navController.navigate(Routes.settings(SettingsSection.PLANNED_MOVES)) },
             )
         }

@@ -32,13 +32,17 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.lastplace.app.data.db.PlannedMove
 import dev.lastplace.app.domain.ReminderKind
+import dev.lastplace.app.domain.ReparkingOption
+import dev.lastplace.app.domain.ReparkingStreet
 import dev.lastplace.app.reminders.ReminderCapabilities
 import dev.lastplace.app.ui.theme.ParkingTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.ZonedDateTime
 
 @RunWith(AndroidJUnit4::class)
 class ParkingScreensTest {
@@ -67,6 +71,11 @@ class ParkingScreensTest {
         hasSavedStreets = true,
         isLoading = false,
     )
+
+    private fun suggestedOption(justCleaned: Boolean = true): ReparkingOption {
+        val time = ZonedDateTime.parse("2026-05-26T14:00:00+02:00[Europe/Stockholm]")
+        return ReparkingOption(ReparkingStreet(2, sectionName, emptyList()), time, time.plusDays(6), justCleaned)
+    }
 
     @Test
     fun loadingDoesNotPretendToBeEmptyOrUnparked() {
@@ -274,6 +283,122 @@ class ParkingScreensTest {
         compose.onNodeWithText("I've parked here").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("Change plan").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Cancel plan").performScrollTo().assertIsDisplayed()
+        val arrival = compose.onNodeWithText("I've parked here").fetchSemanticsNode()
+        val change = compose.onNodeWithText("Change plan").fetchSemanticsNode()
+        val cancel = compose.onNodeWithText("Cancel plan").fetchSemanticsNode()
+        assertEquals(arrival.size.width, change.size.width)
+        assertEquals(change.size.width, cancel.size.width)
+        assertEquals(arrival.positionInRoot.x, change.positionInRoot.x, 1f)
+        assertEquals(change.positionInRoot.x, cancel.positionInRoot.x, 1f)
+        assertTrue(change.positionInRoot.y < cancel.positionInRoot.y)
+    }
+
+    @Test
+    fun plannedMoveActionsUseAFullWidthPrimaryAndEqualAlignedSecondaryButtons() {
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 1f)) {
+                ParkingTheme {
+                    Column(Modifier.width(360.dp).verticalScroll(rememberScrollState())) {
+                        PlannedMoveCard(selectedPlan(), onCancel = {}, onArrived = {}, onChangePlan = {})
+                    }
+                }
+            }
+        }
+        val arrival = compose.onNodeWithText("I've parked here").fetchSemanticsNode()
+        val change = compose.onNodeWithText("Change plan").fetchSemanticsNode()
+        val cancel = compose.onNodeWithText("Cancel plan").fetchSemanticsNode()
+        assertEquals(change.size.width.toFloat(), cancel.size.width.toFloat(), 1f)
+        assertEquals(change.size.height, cancel.size.height)
+        assertEquals(change.positionInRoot.y, cancel.positionInRoot.y, 1f)
+        assertEquals(arrival.positionInRoot.x, change.positionInRoot.x, 1f)
+        assertEquals(arrival.positionInRoot.x + arrival.size.width, cancel.positionInRoot.x + cancel.size.width, 1f)
+        assertTrue(arrival.positionInRoot.y + arrival.size.height <= change.positionInRoot.y)
+    }
+
+    @Test
+    fun suggestedMoveHasItsOwnCardAndPlanningDoesNotRegisterParking() {
+        val option = suggestedOption()
+        var selected: ReparkingOption? = null
+        var optionsOpened = 0
+        var registrations = 0
+        compose.setContent {
+            ParkingTheme {
+                StreetListContent(
+                    parkedState().copy(reparkingOptions = listOf(option), hasPreferredTimes = true),
+                    onSelectPlan = { selected = it },
+                    onOpenReparkingOptions = { optionsOpened++ },
+                    onPark = { _, _ -> registrations++ },
+                )
+            }
+        }
+        val inCard = hasAnyAncestor(hasTestTag("suggested-move-card"))
+        scrollHomeTo(hasText("Suggested move") and inCard).assertIsDisplayed()
+        scrollHomeTo(hasText(sectionName) and inCard).assertIsDisplayed()
+        scrollHomeTo(hasText("Plan this move") and inCard).performClick()
+        scrollHomeTo(hasText("View options") and inCard).performClick()
+        compose.runOnIdle {
+            assertEquals(option, selected)
+            assertEquals(1, optionsOpened)
+            assertEquals(0, registrations)
+        }
+    }
+
+    @Test
+    fun suggestedMoveWithoutDestinationDoesNotOfferAnInvalidPlanAction() {
+        compose.setContent {
+            ParkingTheme {
+                SuggestedMoveCard(null, hasPreferredTimes = true, onPlan = {}, onOpenOptions = {}, onChooseTimes = {})
+            }
+        }
+        compose.onNodeWithText("No available destination").assertExists()
+        compose.onNodeWithText("Plan this move").assertDoesNotExist()
+    }
+
+    @Test
+    fun busyMoveCardsDisableTheirMutationActions() {
+        compose.setContent {
+            ParkingTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    SuggestedMoveCard(suggestedOption(), true, onPlan = {}, onOpenOptions = {}, onChooseTimes = {}, isBusy = true)
+                    PlannedMoveCard(selectedPlan(), onCancel = {}, onArrived = {}, onChangePlan = {}, isBusy = true)
+                }
+            }
+        }
+        compose.onNodeWithText("Plan this move").assertIsNotEnabled()
+        compose.onNodeWithText("I've parked here").assertIsNotEnabled()
+        compose.onNodeWithText("Change plan").assertIsNotEnabled()
+        compose.onNodeWithText("Cancel plan").assertIsNotEnabled()
+    }
+
+    @Test
+    fun optionsStartWithDestinationsAfterTheDeadlineWithoutTheExplanatoryPreamble() {
+        val state = mutableStateOf(parkedState().copy(reparkingOptions = listOf(suggestedOption(false)), hasPreferredTimes = false))
+        compose.setContent { ParkingTheme { ReparkingOptionsContent(state.value) } }
+        compose.onNodeWithText("Move before Tue 26 May, 08:00").assertIsDisplayed()
+        val deadline = compose.onNodeWithText("Move before Tue 26 May, 08:00").fetchSemanticsNode()
+        val card = compose.onNodeWithTag("reparking-option-2").fetchSemanticsNode()
+        assertEquals(with(compose.density) { 16.dp.toPx() }, card.positionInRoot.y - deadline.positionInRoot.y - deadline.size.height, 1f)
+        compose.onNodeWithText("Based on saved cleaning hours, not live parking spaces. Planning never registers parking.").assertDoesNotExist()
+        compose.onNodeWithText("No preferred re-parking times selected").assertDoesNotExist()
+        compose.onNodeWithText("Choose times").assertDoesNotExist()
+        compose.runOnIdle {
+            state.value = state.value.copy(reparkingOptions = listOf(suggestedOption()), hasPreferredTimes = true, plannedMove = selectedPlan())
+        }
+        compose.onNodeWithText("Planned move").assertExists()
+        compose.onNodeWithText("Up to three just-cleaned destinations at your preferred times, latest opportunity first. They may not be available now.").assertDoesNotExist()
+        compose.onNodeWithText("Your selected plan stays fixed. Choosing another option replaces it, not your current parking.").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(reparkingOptions = listOf(suggestedOption(false)), plannedMove = null) }
+        compose.onNodeWithText("No suitable opportunity at your preferred times is available before this deadline. Alternatives available now are ordered by longest stay.").assertDoesNotExist()
+    }
+
+    @Test
+    fun emptyOptionsAndFailedActionsStillHaveFeedback() {
+        compose.setContent {
+            ParkingTheme { ReparkingOptionsContent(parkedState(), actionError = "The plan changed. Please choose again.") }
+        }
+        compose.onNodeWithText("No re-parking options available.").assertIsDisplayed()
+        compose.onNodeWithText("The plan changed. Please choose again.").assertIsDisplayed()
     }
 
     @Test
@@ -358,15 +483,18 @@ class ParkingScreensTest {
         var chooseTimes = 0
         compose.setContent {
             ParkingTheme {
-                ReparkingOptionsContent(
-                    parkedState().copy(hasPreferredTimes = false),
-                    onOpenPreferredTimes = { chooseTimes++ },
+                SuggestedMoveCard(
+                    option = suggestedOption(false),
+                    hasPreferredTimes = false,
+                    onPlan = {},
+                    onOpenOptions = {},
+                    onChooseTimes = { chooseTimes++ },
                 )
             }
         }
         compose.onNodeWithText("No preferred re-parking times selected").assertExists()
-        compose.onNodeWithText("Choose times").performScrollTo().performClick()
-        compose.onNodeWithText("No suitable opportunity at your preferred times is available before this deadline. Alternatives available now are ordered by longest stay.").assertDoesNotExist()
+        compose.onNodeWithText("Choose times").performClick()
+        compose.onNodeWithText("No preferred-time move available.").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, chooseTimes) }
     }
 }
