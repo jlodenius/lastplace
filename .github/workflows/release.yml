@@ -53,4 +53,3 @@ jobs:
           files: LastPlace-*.apk
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-beta.') }}
-          body_path: ${{ contains(github.ref_name, '-beta.') && 'BETA-VALIDATION.md' || '' }}

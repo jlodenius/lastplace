@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -211,6 +212,68 @@ class ParkingScreensTest {
         compose.onNodeWithText("2 hours remaining").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Move before Tue 26 May, 08:00").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("End parking").performScrollTo().assertIsDisplayed()
+    }
+
+    private fun selectedPlan() = PlannedMoveUi(
+        plan = PlannedMove(7, "selected", 2, sectionName, 1L, true, ""),
+        streetName = sectionName,
+        timeText = "Tue 26 May, 14:00",
+        problem = null,
+        timePassed = false,
+        isAvailableNow = true,
+        remindersText = "Planned move reminder scheduled: Tue 26 May, 14:00",
+    )
+
+    @Test
+    fun selectedMoveHasItsOwnCardAndKeepsExplicitArrivalChangeAndCancelActions() {
+        val plan = selectedPlan()
+        var arrived: PlannedMoveUi? = null
+        var cancelled: PlannedMoveUi? = null
+        var changes = 0
+        compose.setContent {
+            ParkingTheme {
+                StreetListContent(
+                    parkedState().copy(plannedMove = plan),
+                    onArrived = { arrived = it },
+                    onCancelPlan = { cancelled = it },
+                    onOpenReparkingOptions = { changes++ },
+                )
+            }
+        }
+        val inCard = hasAnyAncestor(hasTestTag("planned-move-card"))
+        compose.onNodeWithText("2 hours remaining").assertIsDisplayed()
+        scrollHomeTo(hasText("Planned move") and inCard).assertIsDisplayed()
+        scrollHomeTo(hasText(sectionName) and inCard).assertIsDisplayed()
+        scrollHomeTo(hasText(plan.timeText) and inCard).assertIsDisplayed()
+        scrollHomeTo(hasText("I've parked here") and inCard).performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        scrollHomeTo(hasText("Change plan") and inCard).performClick()
+        scrollHomeTo(hasText("Cancel plan") and inCard).performClick()
+        compose.runOnIdle {
+            assertEquals(plan, arrived)
+            assertEquals(plan, cancelled)
+            assertEquals(1, changes)
+        }
+    }
+
+    @Test
+    fun plannedMoveCardStaysReadableAtLargeFontAndCannotRegisterAnUnavailableDestination() {
+        val plan = selectedPlan().copy(isAvailableNow = false)
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 2f)) {
+                ParkingTheme {
+                    Column(Modifier.width(320.dp).verticalScroll(rememberScrollState())) {
+                        PlannedMoveCard(plan, onCancel = {}, onArrived = {}, onChangePlan = {})
+                    }
+                }
+            }
+        }
+        compose.onNodeWithText(sectionName).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(plan.timeText).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("I've parked here").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Change plan").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Cancel plan").performScrollTo().assertIsDisplayed()
     }
 
     @Test

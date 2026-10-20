@@ -275,15 +275,13 @@ internal fun StreetListContent(
                         }
                         state.plannedMove?.let { plan ->
                             item {
-                                PlannedMoveDetails(
+                                PlannedMoveCard(
                                     plan = plan,
                                     onCancel = { onCancelPlan(plan) },
                                     onArrived = { onArrived(plan) },
                                     onChangePlan = onOpenReparkingOptions,
-                                    compact = true,
                                     isBusy = mutationInProgress,
                                     reminderDetails = planReminderDetails,
-                                    modifier = Modifier.padding(top = ParkingLayout.spacing),
                                 )
                             }
                         } ?: state.active?.let { active ->

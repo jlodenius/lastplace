@@ -104,30 +104,6 @@ fun SettingsScreen(onBack: () -> Unit, initialSection: SettingsSection = Setting
                         },
                         modifier = sectionModifier(SettingsSection.DELIVERY),
                     )
-                    Column(modifier = sectionModifier(SettingsSection.DEADLINE_WARNINGS)) {
-                        ReminderPreferences(
-                            kind = ReminderKind.PARKING_DEADLINE,
-                            title = "Parking deadline warnings",
-                            description = "Warn before cleaning starts on your current street, independently of any move plan.",
-                            settings = preferences,
-                            viewModel = viewModel,
-                            onEnabled = { permissionTrigger = ReminderKind.PARKING_DEADLINE },
-                        )
-                        if (readiness.status(ReminderKind.PARKING_DEADLINE, Instant.now()).state == ReminderSchedulingState.NO_UPCOMING) {
-                            Text("No upcoming deadline warnings. All selected warning times have passed; choose a shorter offset. Adding an already-past offset will not help.")
-                        }
-                    }
-                    Column(modifier = sectionModifier(SettingsSection.PLANNED_MOVES)) {
-                        ReminderPreferences(
-                            kind = ReminderKind.PLANNED_MOVE,
-                            title = "Planned move reminders",
-                            description = "Remind you about the move you selected, not cleaning on your current street.",
-                            settings = preferences,
-                            viewModel = viewModel,
-                            onEnabled = { permissionTrigger = ReminderKind.PLANNED_MOVE },
-                        )
-                        Text("Times already passed are skipped. Zero means at the planned move time. Adding an already-past offset will not help.", style = MaterialTheme.typography.bodyMedium)
-                    }
                     Column(modifier = sectionModifier(SettingsSection.REPARKING_TIMES), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Preferred re-parking times", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
                         Text("Choose cleaning end times that work for you. New times start unselected.", style = MaterialTheme.typography.bodyMedium)
@@ -154,6 +130,30 @@ fun SettingsScreen(onBack: () -> Unit, initialSection: SettingsSection = Setting
                                 Text("No preferred re-parking times selected. While parked, you'll see longest-stay alternatives instead.", style = MaterialTheme.typography.bodyMedium)
                             }
                         }
+                    }
+                    Column(modifier = sectionModifier(SettingsSection.DEADLINE_WARNINGS)) {
+                        ReminderPreferences(
+                            kind = ReminderKind.PARKING_DEADLINE,
+                            title = "Parking deadline warnings",
+                            description = "Warn before cleaning starts on your current street, independently of any move plan.",
+                            settings = preferences,
+                            viewModel = viewModel,
+                            onEnabled = { permissionTrigger = ReminderKind.PARKING_DEADLINE },
+                        )
+                        if (readiness.status(ReminderKind.PARKING_DEADLINE, Instant.now()).state == ReminderSchedulingState.NO_UPCOMING) {
+                            Text("No upcoming deadline warnings. All selected warning times have passed; choose a shorter offset. Adding an already-past offset will not help.")
+                        }
+                    }
+                    Column(modifier = sectionModifier(SettingsSection.PLANNED_MOVES)) {
+                        ReminderPreferences(
+                            kind = ReminderKind.PLANNED_MOVE,
+                            title = "Planned move reminders",
+                            description = "Remind you about the move you selected, not cleaning on your current street.",
+                            settings = preferences,
+                            viewModel = viewModel,
+                            onEnabled = { permissionTrigger = ReminderKind.PLANNED_MOVE },
+                        )
+                        Text("Times already passed are skipped. Zero means at the planned move time. Adding an already-past offset will not help.", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }

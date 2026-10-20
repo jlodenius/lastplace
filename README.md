@@ -84,9 +84,7 @@ emulator. Run the local checks with:
 ./gradlew connectedDebugAndroidTest
 ```
 
-The second command requires a connected device/emulator. The reversible UI beta plan is in
-[`BETA.md`](BETA.md); implementation checks and outstanding device/release checks are recorded in
-[`BETA-VALIDATION.md`](BETA-VALIDATION.md).
+The second command requires a connected device/emulator.
 
 ## Releasing an update
 
@@ -125,8 +123,8 @@ Notes:
   remain normal releases. Publishing a beta requires explicit approval. Enable prereleases in
   Obtainium or manually install the signed APK, without uninstalling or clearing application data.
   A local debug-signed build cannot update an existing release-signed installation.
-- Revert the single beta commit to undo the experiment, then publish a newly versioned signed
-  recovery release with a higher CI version code. Do not downgrade by uninstalling the beta.
+- To roll back a change, revert its commit and publish a newly versioned signed recovery release
+  with a higher CI version code. Do not downgrade by uninstalling or clearing application data.
 
 ## Built with
 
